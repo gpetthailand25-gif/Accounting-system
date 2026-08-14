@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ระบบประกันรถยนต์</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="firebase-storage.js"></script>
+
+<script>
+const STORAGE_KEY_ASSETS = 'assets';
+const STORAGE_KEY_POLICIES = 'policies';
+const ASSET_TYPE = 'vehicle';
+
+let assets = [];
+let policies = [];
+let view = { name: 'dashboard' };
+
+const uid = () => Math.random().toString(36).slice(2,10);
+const todayStr = () => new Date().toISOString().slice(0,10);
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString('th-TH', {year:'numeric', month:'short', day:'numeric'}) : '-';
+const fmtMoney = (n) => n ? Number(n).toLocaleString('th-TH') + ' บาท' : '-';
+
+function policyStatus(p){
+  if(!p || !p.endDate) return 'none';
+  const days = Math.ceil((new Date(p.endDate) - new Date(todayStr())) / 86400000);
+  if(days < 0) return 'expired';
+  if(days <= 30) return 'expiring';
+  return 'active';
+}
+function latestPolicyFor(assetId){
+  const list = policies.filter(p => p.assetId === assetId);
+  if(list.length === 0) return null;
+  return list.slice().sort((a,b) => new Date(b.endDate||0) - new Date(a.endDate||0))[0];
+}
+function assetOverallStatus(assetId){
+  const list = policies.filter(p => p.assetId === assetId);
+  if(list.length === 0) return 'none';
+  const statuses = list.map(policyStatus);
+  if(statuses.includes('expired')) return 'expired';
+  if(statuses.includes('expiring')) return 'expiring';
+  return 'active';
+}
+function statusPill(status){
+  const map = {
+    active: ['pill-ok','ปกติ'],
+    expiring: ['pill-warn','ใกล้หมดอายุ'],
+    expired: ['pill-danger','หมดอายุ'],
+    none: ['pill-none','ไม่มีประกัน']
+  };
+  const [cls,label] = map[status] || map.none;
+  return `<span class="pill ${cls}">${label}</span>`;
+}
+
+async function loadData(){
+  try{
+    const a = await window.storage.get(STORAGE_KEY_ASSETS);
+    assets = a ? JSON.parse(a.value) : [];
+  }catch(e){ assets = []; }
+  try{
+    const p = await window.storage.get(STORAGE_KEY_POLICIES);
+    policies = p ? JSON.parse(p.value) : [];
+  }catch(e){ policies = []; }
+  render();
+}
+async function saveAssets(){
+  try{ await window.storage.set(STORAGE_KEY_ASSETS, JSON.stringify(assets), false); }
+  catch(e){ console.error('save assets failed', e); }
+}
+async function savePolicies(){
+  try{ await window.storage.set(STORAGE_KEY_POLICIES, JSON.stringify(policies), false); }
+  catch(e){ console.error('save policies failed', e); }
+}
+
+function vehicleAssets(){ return assets.filter(a => a.type === ASSET_TYPE); }
+
+function go(name, params){
+  view = { name, params: params||{} };
+  render();
+}
+
+function render(){
+  const app = document.getElementById('app');
+  app.innerHTML = topbarHtml() + bodyHtml();
+  attachHandlers();
+}
+
+function topbarHtml(){
+  return `
+  <header class="topbar">
+    <a class="back-home" href="index.html">
+      <div class="brand-mark blue">รถ</div>
+      <div class="brand-text">
+        <h1>ระบบประกันรถยนต์</h1>
+        <p>กรมธรรม์ประกันภัยรถยนต์ในความดูแล</p>
+      </div>
+    </a>
+    <nav class="tabs">
+      <button data-nav="dashboard" class="${view.name==='dashboard'?'active':''}">แดชบอร์ด</button>
+      <button data-nav="assetForm" class="${view.name==='assetForm'?'active':''}">เพิ่มรถยนต์</button>
+      <a class="btn" href="asset-registry.html" style="margin-left:4px;">ทะเบียนทรัพย์สิน</a>
+      <a class="btn" href="index.html">หน้าหลัก</a>
+    </nav>
+  </header>`;
+}
+
+function bodyHtml(){
+  if(view.name === 'dashboard') return dashboardHtml();
+  if(view.name === 'assetForm') return assetFormHtml(view.params.assetId);
+  if(view.name === 'assetDetail') return assetDetailHtml(view.params.assetId);
+  if(view.name === 'policyForm') return policyFormHtml(view.params.assetId, view.params.policyId);
+  return '';
+}
+
+// ---------- DASHBOARD ----------
+function dashboardHtml(){
+  const list0 = vehicleAssets();
+  const total = list0.length;
+  const vehiclePolicies = policies.filter(p => list0.some(a => a.id === p.assetId));
+  const activePolicies = vehiclePolicies.filter(p => policyStatus(p) === 'active' || policyStatus(p)==='expiring').length;
+  const expiringSoon = vehiclePolicies.filter(p => policyStatus(p) === 'expiring').length;
+  const expired = vehiclePolicies.filter(p => policyStatus(p) === 'expired').length;
+
+  const q = (view.params && view.params.q) || '';
+  const statusFilter = (view.params && view.params.status) || 'all';
+
+  let list = list0.slice();
+  if(q){
+    const ql = q.toLowerCase();
+    list = list.filter(a => (a.name||'').toLowerCase().includes(ql) || (a.owner||'').toLowerCase().includes(ql) || (a.plate||'').toLowerCase().includes(ql) || (a.brand||'').toLowerCase().includes(ql));
+  }
+  if(statusFilter !== 'all') list = list.filter(a => assetOverallStatus(a.id) === statusFilter);
+
+  const rows = list.map(a => {
+    const status = assetOverallStatus(a.id);
+    const lp = latestPolicyFor(a.id);
+    return `
+    <tr data-open-asset="${a.id}">
+      <td>
+        <div style="font-weight:500;">${escapeHtml(a.name)}</div>
+        <div style="font-size:12px;color:var(--ink-soft);">${escapeHtml(a.plate||'-')} · ${escapeHtml(a.brand||'-')}</div>
+      </td>
+      <td>${lp ? escapeHtml(lp.insurer) : '-'}</td>
+      <td>${lp ? fmtDate(lp.endDate) : '-'}</td>
+      <td>${statusPill(status)}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="grid-summary">
+    <div class="metric"><div class="label">รถยนต์ที่ลงทะเบียน</div><div class="value">${total}</div></div>
+    <div class="metric"><div class="label">กรมธรรม์ที่ยังคุ้มครอง</div><div class="value">${activePolicies}</div></div>
+    <div class="metric warn"><div class="label">ใกล้หมดอายุ (30 วัน)</div><div class="value">${expiringSoon}</div></div>
+    <div class="metric danger"><div class="label">หมดอายุแล้ว</div><div class="value">${expired}</div></div>
+  </div>
+
+  <div class="toolbar">
+    <input type="text" id="searchInput" placeholder="ค้นหาชื่อรถ ทะเบียน หรือผู้ครอบครอง" value="${escapeAttr(q)}">
+    <select id="statusFilter">
+      <option value="all" ${statusFilter==='all'?'selected':''}>สถานะทั้งหมด</option>
+      <option value="active" ${statusFilter==='active'?'selected':''}>ปกติ</option>
+      <option value="expiring" ${statusFilter==='expiring'?'selected':''}>ใกล้หมดอายุ</option>
+      <option value="expired" ${statusFilter==='expired'?'selected':''}>หมดอายุ</option>
+      <option value="none" ${statusFilter==='none'?'selected':''}>ไม่มีประกัน</option>
+    </select>
+    <button class="btn btn-primary" id="btnAddAsset">+ เพิ่มรถยนต์</button>
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden;">
+    ${list.length === 0 ? `
+      <div class="empty">
+        <p>${list0.length===0 ? 'ยังไม่มีรถยนต์ในระบบ เริ่มต้นเพิ่มรายการแรกของคุณ หรือเพิ่มผ่านระบบทะเบียนทรัพย์สิน' : 'ไม่พบรายการที่ตรงกับเงื่อนไข'}</p>
+        ${list0.length===0 ? '<button class="btn btn-primary" id="btnAddAssetEmpty">+ เพิ่มรถยนต์</button>' : ''}
+      </div>
+    ` : `
+      <table>
+        <thead><tr><th>รถยนต์</th><th>บริษัทประกัน</th><th>วันหมดอายุล่าสุด</th><th>สถานะ</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `}
+  </div>`;
+}
+
+// ---------- ASSET (VEHICLE) FORM ----------
+function assetFormHtml(assetId){
+  const editing = assets.find(a => a.id === assetId);
+
+  return `
+  <div class="back-row"><button class="btn-ghost" data-nav="dashboard">← กลับแดชบอร์ด</button></div>
+  <div class="card" style="max-width:640px;">
+    <h2 style="margin:0 0 18px;font-size:17px;">${editing ? 'แก้ไขข้อมูลรถยนต์' : 'เพิ่มรถยนต์ใหม่'}</h2>
+
+    <form id="assetForm">
+      <input type="hidden" name="type" value="vehicle">
+      <div class="form-grid">
+        <div class="field full">
+          <label>ชื่อรายการ / ป้ายชื่อ</label>
+          <input type="text" name="name" required placeholder="เช่น รถกระบะสำนักงาน 1" value="${escapeAttr(editing?.name||'')}">
+        </div>
+        <div class="field">
+          <label>ผู้ครอบครอง / หน่วยงานที่ดูแล</label>
+          <input type="text" name="owner" placeholder="ชื่อบุคคลหรือฝ่ายที่รับผิดชอบ" value="${escapeAttr(editing?.owner||'')}">
+        </div>
+        <div class="field">
+          <label>ทะเบียนรถ</label>
+          <input type="text" name="plate" placeholder="เช่น กข-1234 กรุงเทพฯ" value="${escapeAttr(editing?.plate||'')}">
+        </div>
+        <div class="field">
+          <label>ยี่ห้อ / รุ่น</label>
+          <input type="text" name="brand" placeholder="เช่น Toyota Hilux Revo" value="${escapeAttr(editing?.brand||'')}">
+        </div>
+        <div class="field">
+          <label>ปีที่จดทะเบียน</label>
+          <input type="number" name="year" placeholder="2566" value="${escapeAttr(editing?.year||'')}">
+        </div>
+        <div class="field full">
+          <label>เอกสารอ้างอิง (ชื่อไฟล์ / เลขที่เอกสาร)</label>
+          <input type="text" name="docRef" placeholder="เช่น สำเนาทะเบียนรถ_กข1234.pdf" value="${escapeAttr(editing?.docRef||'')}">
+        </div>
+      </div>
+
+      <div class="form-actions">
+        ${editing ? `<button type="button" class="btn btn-danger" id="btnDeleteAsset">ลบรายการ</button>` : ''}
+        <button type="button" class="btn" data-nav="dashboard">ยกเลิก</button>
+        <button type="submit" class="btn btn-primary">${editing ? 'บันทึกการแก้ไข' : 'บันทึกรถยนต์'}</button>
+      </div>
+    </form>
+  </div>`;
+}
+
+// ---------- ASSET DETAIL ----------
+function assetDetailHtml(assetId){
+  const a = assets.find(x => x.id === assetId && x.type === ASSET_TYPE);
+  if(!a) return `<p>ไม่พบรายการ</p>`;
+  const assetPolicies = policies.filter(p => p.assetId === assetId).slice().sort((x,y) => new Date(y.endDate||0)-new Date(x.endDate||0));
+
+  const kvRows = `
+    <div><span class="k">ทะเบียนรถ</span><span class="v">${escapeHtml(a.plate||'-')}</span></div>
+    <div><span class="k">ยี่ห้อ / รุ่น</span><span class="v">${escapeHtml(a.brand||'-')}</span></div>
+    <div><span class="k">ปีที่จดทะเบียน</span><span class="v">${escapeHtml(a.year||'-')}</span></div>
+    <div><span class="k">ผู้ครอบครอง</span><span class="v">${escapeHtml(a.owner||'-')}</span></div>
+  `;
+
+  const policyItems = assetPolicies.length === 0 ? `
+    <div class="empty" style="padding:30px 10px;">
+      <p>ยังไม่มีกรมธรรม์ประกันสำหรับรถยนต์คันนี้</p>
+    </div>
+  ` : assetPolicies.map(p => {
+    const st = policyStatus(p);
+    return `
+    <div class="policy-item">
+      <div class="pi-main">
+        <p style="font-weight:500;">${escapeHtml(p.insurer)} · เลขกรมธรรม์ ${escapeHtml(p.policyNumber||'-')} ${p.insClass ? '· ประเภท '+escapeHtml(p.insClass) : ''}</p>
+        <p class="sub">คุ้มครอง ${fmtDate(p.startDate)} — ${fmtDate(p.endDate)} · เบี้ยประกัน ${fmtMoney(p.premium)}</p>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        ${statusPill(st)}
+        <button class="btn-ghost" data-edit-policy="${p.id}">แก้ไข</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+  <div class="back-row"><button class="btn-ghost" data-nav="dashboard">← กลับแดชบอร์ด</button></div>
+  <div class="card">
+    <div class="detail-head">
+      <div>
+        <h2>${escapeHtml(a.name)}</h2>
+        <p>ทะเบียนรถยนต์ ${statusPill(assetOverallStatus(a.id))}</p>
+      </div>
+      <div class="detail-actions">
+        <button class="btn" data-edit-asset="${a.id}">แก้ไขข้อมูลรถ</button>
+        <button class="btn btn-primary" data-add-policy="${a.id}">+ เพิ่มกรมธรรม์</button>
+      </div>
+    </div>
+
+    <div class="kv">${kvRows}</div>
+    ${a.docRef ? `<p style="font-size:13px;color:var(--ink-soft);margin:-6px 0 20px;">เอกสารอ้างอิง: ${escapeHtml(a.docRef)}</p>` : ''}
+
+    <div class="section-title">ประวัติกรมธรรม์ประกัน</div>
+    ${policyItems}
+  </div>`;
+}
+
+// ---------- POLICY FORM ----------
+function policyFormHtml(assetId, policyId){
+  const a = assets.find(x => x.id === assetId);
+  if(!a) return `<p>ไม่พบรถยนต์</p>`;
+  const editing = policies.find(p => p.id === policyId);
+
+  return `
+  <div class="back-row"><button class="btn-ghost" data-nav="assetDetail" data-asset="${assetId}">← กลับหน้ารายการ</button></div>
+  <div class="card" style="max-width:560px;">
+    <h2 style="margin:0 0 4px;font-size:17px;">${editing ? 'แก้ไขกรมธรรม์' : 'เพิ่มกรมธรรม์ประกันรถยนต์'}</h2>
+    <p style="margin:0 0 18px;color:var(--ink-soft);font-size:13px;">สำหรับ ${escapeHtml(a.name)} (${escapeHtml(a.plate||'-')})</p>
+
+    <form id="policyForm">
+      <div class="form-grid">
+        <div class="field full">
+          <label>บริษัทประกัน</label>
+          <input type="text" name="insurer" required placeholder="เช่น วิริยะประกันภัย" value="${escapeAttr(editing?.insurer||'')}">
+        </div>
+        <div class="field">
+          <label>เลขที่กรมธรรม์</label>
+          <input type="text" name="policyNumber" placeholder="เลขที่กรมธรรม์" value="${escapeAttr(editing?.policyNumber||'')}">
+        </div>
+        <div class="field">
+          <label>ประเภทประกัน</label>
+          <select name="insClass">
+            <option value="ชั้น 1" ${editing?.insClass==='ชั้น 1'?'selected':''}>ชั้น 1</option>
+            <option value="ชั้น 2+" ${editing?.insClass==='ชั้น 2+'?'selected':''}>ชั้น 2+</option>
+            <option value="ชั้น 3+" ${editing?.insClass==='ชั้น 3+'?'selected':''}>ชั้น 3+</option>
+            <option value="ชั้น 3" ${editing?.insClass==='ชั้น 3'?'selected':''}>ชั้น 3</option>
+            <option value="พ.ร.บ." ${editing?.insClass==='พ.ร.บ.'?'selected':''}>พ.ร.บ.</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>เบี้ยประกัน (บาท)</label>
+          <input type="number" name="premium" placeholder="0" value="${escapeAttr(editing?.premium||'')}">
+        </div>
+        <div class="field">
+          <label>ทุนประกันภัย (บาท)</label>
+          <input type="number" name="coverAmount" placeholder="0" value="${escapeAttr(editing?.coverAmount||'')}">
+        </div>
+        <div class="field">
+          <label>วันเริ่มคุ้มครอง</label>
+          <input type="date" name="startDate" value="${escapeAttr(editing?.startDate||'')}">
+        </div>
+        <div class="field">
+          <label>วันสิ้นสุดความคุ้มครอง</label>
+          <input type="date" name="endDate" required value="${escapeAttr(editing?.endDate||'')}">
+        </div>
+        <div class="field full">
+          <label>เอกสารอ้างอิง (ชื่อไฟล์กรมธรรม์)</label>
+          <input type="text" name="docRef" placeholder="เช่น กรมธรรม์รถยนต์_2569.pdf" value="${escapeAttr(editing?.docRef||'')}">
+        </div>
+      </div>
+
+      <div class="form-actions">
+        ${editing ? `<button type="button" class="btn btn-danger" id="btnDeletePolicy">ลบกรมธรรม์</button>` : ''}
+        <button type="button" class="btn" data-nav="assetDetail" data-asset="${assetId}">ยกเลิก</button>
+        <button type="submit" class="btn btn-primary">${editing ? 'บันทึกการแก้ไข' : 'บันทึกกรมธรรม์'}</button>
+      </div>
+    </form>
+  </div>`;
+}
+
+// ---------- HELPERS ----------
+function escapeHtml(s){ return (s===undefined||s===null) ? '' : String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeAttr(s){ return escapeHtml(s); }
+
+// ---------- EVENT HANDLERS ----------
+function attachHandlers(){
+  document.querySelectorAll('[data-nav]').forEach(el => {
+    el.addEventListener('click', () => {
+      const name = el.getAttribute('data-nav');
+      const assetId = el.getAttribute('data-asset');
+      go(name, assetId ? { assetId } : {});
+    });
+  });
+
+  const btnAddAsset = document.getElementById('btnAddAsset');
+  if(btnAddAsset) btnAddAsset.addEventListener('click', () => go('assetForm', {}));
+  const btnAddAssetEmpty = document.getElementById('btnAddAssetEmpty');
+  if(btnAddAssetEmpty) btnAddAssetEmpty.addEventListener('click', () => go('assetForm', {}));
+
+  document.querySelectorAll('[data-open-asset]').forEach(tr => {
+    tr.addEventListener('click', () => go('assetDetail', { assetId: tr.getAttribute('data-open-asset') }));
+  });
+
+  const searchInput = document.getElementById('searchInput');
+  if(searchInput){
+    searchInput.addEventListener('input', () => {
+      go('dashboard', { ...(view.params||{}), q: searchInput.value });
+    });
+  }
+  const statusFilter = document.getElementById('statusFilter');
+  if(statusFilter){
+    statusFilter.addEventListener('change', () => {
+      go('dashboard', { ...(view.params||{}), status: statusFilter.value });
+    });
+  }
+
+  const assetForm = document.getElementById('assetForm');
+  if(assetForm){
+    assetForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(assetForm);
+      const data = Object.fromEntries(fd.entries());
+      const editingId = view.params && view.params.assetId;
+      if(editingId){
+        const idx = assets.findIndex(a => a.id === editingId);
+        assets[idx] = { ...assets[idx], ...data };
+      } else {
+        assets.push({ id: uid(), createdAt: todayStr(), ...data });
+      }
+      await saveAssets();
+      go('dashboard', {});
+    });
+  }
+  const btnDeleteAsset = document.getElementById('btnDeleteAsset');
+  if(btnDeleteAsset){
+    btnDeleteAsset.addEventListener('click', async () => {
+      const editingId = view.params && view.params.assetId;
+      assets = assets.filter(a => a.id !== editingId);
+      policies = policies.filter(p => p.assetId !== editingId);
+      await saveAssets();
+      await savePolicies();
+      go('dashboard', {});
+    });
+  }
+
+  document.querySelectorAll('[data-edit-asset]').forEach(btn => {
+    btn.addEventListener('click', () => go('assetForm', { assetId: btn.getAttribute('data-edit-asset') }));
+  });
+  document.querySelectorAll('[data-add-policy]').forEach(btn => {
+    btn.addEventListener('click', () => go('policyForm', { assetId: btn.getAttribute('data-add-policy') }));
+  });
+  document.querySelectorAll('[data-edit-policy]').forEach(btn => {
+    const assetId = view.params && view.params.assetId;
+    btn.addEventListener('click', () => go('policyForm', { assetId, policyId: btn.getAttribute('data-edit-policy') }));
+  });
+
+  const policyForm = document.getElementById('policyForm');
+  if(policyForm){
+    policyForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(policyForm);
+      const data = Object.fromEntries(fd.entries());
+      const assetId = view.params.assetId;
+      const editingId = view.params.policyId;
+      if(editingId){
+        const idx = policies.findIndex(p => p.id === editingId);
+        policies[idx] = { ...policies[idx], ...data };
+      } else {
+        policies.push({ id: uid(), assetId, ...data });
+      }
+      await savePolicies();
+      go('assetDetail', { assetId });
+    });
+  }
+  const btnDeletePolicy = document.getElementById('btnDeletePolicy');
+  if(btnDeletePolicy){
+    btnDeletePolicy.addEventListener('click', async () => {
+      const assetId = view.params.assetId;
+      const editingId = view.params.policyId;
+      policies = policies.filter(p => p.id !== editingId);
+      await savePolicies();
+      go('assetDetail', { assetId });
+    });
+  }
+}
+
+loadData();
+</script>
+</body>
+</html>
