@@ -236,6 +236,7 @@
     photoBusy: false,
     formDefaults: { date: todayStr(), type: DEFAULT_SETTINGS.wasteTypes[0].id, line: "", method: "" },
     printModalOpen: false,
+    confirmDeleteEntryId: null,
     printDefaults: null,
     ledgerSearch: "",
     ledgerDateFrom: "",
@@ -445,7 +446,8 @@
          state.tab === "dashboard" ? renderDashboardTab() : renderSettingsTab()) +
       "</div>" +
       renderLightbox() +
-      renderPrintModal();
+      renderPrintModal() +
+      renderDeleteConfirmModal();
     updateSaveIndicator();
   }
 
@@ -503,6 +505,22 @@
           '<div class="wt-field"><label>เลขที่เอกสาร</label><input id="printDocNumber" value="' + esc(d.docNumber) + '"></div>' +
           '<button class="wt-submit" type="button" data-action="generatePrint">🖨 สร้าง &amp; พิมพ์รายงาน</button>' +
           '<button class="wt-cancel-link" type="button" data-action="closePrintModal" style="display:block;text-align:center;width:100%;margin-top:10px;">ยกเลิก</button>' +
+        "</div>" +
+      "</div>"
+    );
+  }
+
+  function renderDeleteConfirmModal() {
+    if (!state.confirmDeleteEntryId) return "";
+    var entry = state.entries.find(function (x) { return x.id === state.confirmDeleteEntryId; });
+    var desc = entry ? esc(entry.productName) + " · " + esc(entry.date) : "";
+    return (
+      '<div class="wt-lightbox" data-action="cancelDeleteEntry" style="align-items:flex-start;padding-top:60px;">' +
+        '<div class="wt-card" style="width:320px;max-width:90vw;text-align:left;">' +
+          "<h3>ยืนยันการลบรายการ</h3>" +
+          '<div style="margin:6px 0 16px;color:var(--text-muted);">ต้องการลบรายการ' + (desc ? " " + desc : "") + " นี้ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้" + "</div>" +
+          '<button class="wt-submit" type="button" data-action="confirmDeleteEntry" style="background:var(--danger);border-color:var(--danger);">ลบรายการ</button>' +
+          '<button class="wt-cancel-link" type="button" data-action="cancelDeleteEntry" style="display:block;text-align:center;width:100%;margin-top:10px;">ยกเลิก</button>' +
         "</div>" +
       "</div>"
     );
@@ -1108,11 +1126,18 @@
         state.rangeEnd = b.end;
         render(); break;
       case "deleteEntry":
-        var delId = el.getAttribute("data-id");
+        state.confirmDeleteEntryId = el.getAttribute("data-id");
+        render(); break;
+      case "confirmDeleteEntry":
+        var delId = state.confirmDeleteEntryId;
+        state.confirmDeleteEntryId = null;
         if (state.editingEntryId === delId) { state.editingEntryId = null; state.pendingPhotos = []; }
         state.entries = state.entries.filter(function (x) { return x.id !== delId; });
         render();
         deleteEntryRemote(delId);
+        break;
+      case "cancelDeleteEntry":
+        if (e.target === el) { state.confirmDeleteEntryId = null; render(); }
         break;
       case "editEntry":
         var editTarget = state.entries.find(function (x) { return x.id === el.getAttribute("data-id"); });
