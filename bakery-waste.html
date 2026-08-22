@@ -356,29 +356,6 @@
       .catch(function (err) { console.error(err); settingsSaveState = "error"; updateSaveIndicator(); });
   }
 
-  function dataUrlToBlob(dataUrl) {
-    var parts = dataUrl.split(",");
-    var mimeMatch = parts[0].match(/:(.*?);/);
-    var mime = mimeMatch ? mimeMatch[1] : "image/jpeg";
-    var binary = atob(parts[1]);
-    var arr = new Uint8Array(binary.length);
-    for (var i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
-    return new Blob([arr], { type: mime });
-  }
-  // uploads any pending photo that is still a data: URL (new capture) to Storage,
-  // leaves already-uploaded https:// URLs (from editing an existing entry) untouched
-  function uploadNewPhotos(entryId, photosArr) {
-    var uploads = photosArr.map(function (p, i) {
-      if (typeof p === "string" && p.indexOf("data:") === 0) {
-        var blob = dataUrlToBlob(p);
-        var path = "photos/" + entryId + "/" + Date.now() + "_" + i + ".jpg";
-        var ref = fbStorage.ref().child(path);
-        return ref.put(blob).then(function (snap) { return snap.ref.getDownloadURL(); });
-      }
-      return Promise.resolve(p);
-    });
-    return Promise.all(uploads);
-  }
   function persistEntry(entry) {
     saveState = "saving";
     updateSaveIndicator();
@@ -500,15 +477,17 @@
   function renderLightbox() {
     if (!state.lightboxEntryId) return "";
     var entry = state.entries.find(function (e) { return e.id === state.lightboxEntryId; });
-    if (!entry || !entry.photos || !entry.photos.length) return "";
-    var idx = Math.max(0, Math.min(state.lightboxIndex, entry.photos.length - 1));
-    var nav = entry.photos.length > 1
+    if (!entry) return "";
+    var photos = entry.photos || [];
+    if (!photos.length) return "";
+    var idx = Math.max(0, Math.min(state.lightboxIndex, photos.length - 1));
+    var nav = photos.length > 1
       ? '<button class="wt-lb-nav wt-lb-prev" data-action="lightboxPrev">‹</button>' +
         '<button class="wt-lb-nav wt-lb-next" data-action="lightboxNext">›</button>' +
-        '<div class="wt-lb-count">' + (idx + 1) + " / " + entry.photos.length + "</div>"
+        '<div class="wt-lb-count">' + (idx + 1) + " / " + photos.length + "</div>"
       : "";
     return '<div class="wt-lightbox" data-action="closeLightbox">' +
-      '<img src="' + entry.photos[idx] + '" alt="รูปของเสีย">' + nav +
+      '<img src="' + photos[idx] + '" alt="รูปของเสีย">' + nav +
       "</div>";
   }
 
@@ -570,9 +549,10 @@
       list.map(function (e) {
         var t = findWasteType(e.type);
         var status = getEntryStatus(e);
-        var thumb = (e.photos && e.photos.length)
-          ? '<div class="wt-thumb-wrap"><img class="wt-thumb" src="' + e.photos[0] + '" alt="" data-action="openLightbox" data-id="' + e.id + '">' +
-            (e.photos.length > 1 ? '<span class="wt-thumb-badge">' + e.photos.length + "</span>" : "") + "</div>"
+        var ePhotos = e.photos || [];
+        var thumb = ePhotos.length
+          ? '<div class="wt-thumb-wrap"><img class="wt-thumb" src="' + ePhotos[0] + '" alt="" data-action="openLightbox" data-id="' + e.id + '">' +
+            (ePhotos.length > 1 ? '<span class="wt-thumb-badge">' + ePhotos.length + "</span>" : "") + "</div>"
           : '<div class="wt-thumb-empty">–</div>';
         var rootCauseCell = (e.rootCause && e.rootCause.trim())
           ? '<div class="wt-rootcause-cell">' + esc(e.rootCause) + "</div>"
@@ -981,33 +961,33 @@
     var isEditing = !!state.editingEntryId;
     var entryId = isEditing ? state.editingEntryId : uid();
     var createdAt = isEditing ? state.entries.find(function (x) { return x.id === state.editingEntryId; }).createdAt : Date.now();
-    var pendingPhotosSnapshot = state.pendingPhotos.slice();
-
-    // photos that are already uploaded (https://... URLs from an earlier save) can go in
-    // immediately; only brand-new photos (data: URLs from the file picker) need a network
-    // upload, so we don't make the user wait for that before the record is saved.
-    var alreadyUploadedPhotos = pendingPhotosSnapshot.filter(function (p) {
-      return typeof p === "string" && p.indexOf("data:") !== 0;
-    });
-    var hasNewPhotos = alreadyUploadedPhotos.length < pendingPhotosSnapshot.length;
-
-    var submitBtn = document.querySelector("#entryForm .wt-submit");
-    if (submitBtn) submitBtn.disabled = true;
-    showFormError("กำลังบันทึก…");
+    var photos = state.pendingPhotos.slice();
 
     var entry = {
       id: entryId,
       date: date, productName: product.name, productCode: product.code,
       type: type, quantity: quantity, unit: product.unit, unitPrice: unitPrice,
       totalAmount: quantity * unitPrice, line: line, method: method, note: note, rootCause: rootCause,
-      photos: alreadyUploadedPhotos,
+      photos: photos,
       createdAt: createdAt
     };
 
+    // Firestore documents are capped at ~1MB; photos are embedded directly in the
+    // document now (no separate Storage upload step to fail silently), so guard
+    // against an oversized batch instead of letting the save fail with a cryptic error.
+    var approxBytes = JSON.stringify(entry).length;
+    if (approxBytes > 900000) {
+      return showFormError("แนบรูปรวมกันใหญ่เกินไป กรุณาลดจำนวนรูป หรือแนบทีละ 2-3 รูป");
+    }
+
+    var submitBtn = document.querySelector("#entryForm .wt-submit");
+    if (submitBtn) submitBtn.disabled = true;
+    showFormError("กำลังบันทึก…");
+
     // Firestore applies this write to its local cache immediately and fires the
-    // entries listener right away (before the server even acknowledges it), so we
-    // don't need to wait on the promise below to update the UI — only to catch a
-    // real failure (offline, permission error, etc.) after the fact.
+    // entries listener right away (before the server even acknowledges it), so the
+    // photo and the rest of the record appear together, instantly — we only need
+    // to wait on the promise below to catch a real failure after the fact.
     persistEntry(entry).catch(function (err) {
       console.error(err);
       showFormError("บันทึกไม่สำเร็จ: " + (err && err.message ? err.message : "ลองใหม่อีกครั้ง"));
@@ -1020,16 +1000,6 @@
     showFormError("");
     if (submitBtn) submitBtn.disabled = false;
     render();
-
-    // upload any new photos in the background; the entries listener will pick up
-    // the update automatically and the thumbnail will appear once it's ready
-    if (hasNewPhotos) {
-      uploadNewPhotos(entryId, pendingPhotosSnapshot).then(function (photoUrls) {
-        return entriesCol.doc(entryId).update({ photos: photoUrls });
-      }).catch(function (err) {
-        console.error("อัปโหลดรูปพื้นหลังไม่สำเร็จ", err);
-      });
-    }
   }
 
   function handlePhotoChange(input) {
@@ -1163,7 +1133,7 @@
       case "closeLightbox": if (e.target === el) { state.lightboxEntryId = null; render(); } break;
       case "lightboxPrev": case "lightboxNext":
         var lbEntry = state.entries.find(function (x) { return x.id === state.lightboxEntryId; });
-        if (lbEntry && lbEntry.photos.length) {
+        if (lbEntry && lbEntry.photos && lbEntry.photos.length) {
           var len = lbEntry.photos.length;
           state.lightboxIndex = action === "lightboxPrev" ? (state.lightboxIndex - 1 + len) % len : (state.lightboxIndex + 1) % len;
           render();
