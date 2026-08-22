@@ -5,10 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bakery Waste Manifest — ระบบบันทึกของเสีย</title>
 <style>
-</head>
-<body>
-<div class="back-bar"><a href="index.html">← กลับหน้าหลัก</a></div>
-<style>
   @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
   :root {
@@ -454,6 +450,7 @@
             '<div class="wt-error">' + esc(state.loginError) + "</div>" +
             '<button class="wt-submit" type="submit">เข้าสู่ระบบ</button>' +
           "</form>" +
+          '<a href="index.html" class="wt-cancel-link" style="display:block;text-align:center;width:100%;margin-top:10px;">← กลับหน้าหลัก</a>' +
         "</div>" +
       "</div>"
     );
@@ -485,6 +482,7 @@
         '<div class="wt-eyebrow" style="justify-content:space-between;display:flex;">' +
           '<span>โรงงานเบเกอรี่ · ระบบบันทึกของเสีย</span>' +
           '<span class="wt-mono" style="color:var(--text-muted);display:flex;align-items:center;gap:10px;">' +
+            '<a href="index.html" class="wt-link" style="text-decoration:none;">← กลับหน้าหลัก</a>' +
             esc(state.roleLabel) +
             '<button type="button" class="wt-link" data-action="logout" style="text-decoration:none;">ออกจากระบบ</button>' +
           "</span>" +
