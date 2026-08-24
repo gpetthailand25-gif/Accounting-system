@@ -13,7 +13,7 @@
     --accent-soft: #B9840A; --money: #C9930A; --warn: #C97A12; --danger: #D9584A; --good: #4E9A5C;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; }
+  html, body { margin: 0; padding: 0; overflow-x: hidden; }
   body {
     font-family: 'IBM Plex Sans Thai', sans-serif;
     background: radial-gradient(ellipse at top, #FFFDF2 0%, #FFF2CC 100%);
@@ -41,7 +41,7 @@
   .wt-entry-grid { display: grid; grid-template-columns: 380px 1fr; gap: 22px; }
   @media (max-width: 900px) { .wt-entry-grid { grid-template-columns: 1fr; } }
 
-  .wt-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: 0 1px 2px rgba(160,120,30,0.05); }
+  .wt-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: 0 1px 2px rgba(160,120,30,0.05); min-width: 0; }
   .wt-card h3 { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; margin: 0 0 14px; border-left: 3px solid var(--accent); padding-left: 9px; color: var(--accent-soft); }
   .wt-field { margin-bottom: 12px; }
   .wt-field label { display: block; font-size: 12.5px; color: var(--text-muted); margin-bottom: 5px; font-weight: 600; }
@@ -83,7 +83,7 @@
   .wt-csv-btn:hover { color: var(--text); border-color: var(--accent); }
   .wt-csv-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  .wt-table-wrap { overflow-x: auto; max-height: 560px; overflow-y: auto; border-radius: 8px; }
+  .wt-table-wrap { overflow-x: auto; max-height: 560px; overflow-y: auto; border-radius: 8px; min-width: 0; -webkit-overflow-scrolling: touch; }
   table.wt-table { width: 100%; border-collapse: collapse; font-size: 13px; }
   table.wt-table thead th { text-align: left; font-weight: 700; color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; padding: 9px 8px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface); }
   table.wt-table td { padding: 9px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
