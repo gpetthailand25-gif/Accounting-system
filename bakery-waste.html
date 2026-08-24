@@ -944,7 +944,9 @@
               '<button class="wt-submit" type="submit" style="width:auto;padding:9px 16px;margin-top:0;">' + (editing ? "บันทึก" : "+ เพิ่ม") + "</button>" +
             "</div>" +
             '<div class="wt-error" id="productFormError"></div>' +
+            '<div class="wt-hint" id="productFormNote" style="color:var(--good);min-height:14px;"></div>' +
             (editing ? '<button type="button" class="wt-cancel-link" data-action="cancelEditProduct">ยกเลิกการแก้ไข</button>' : "") +
+            '<div class="wt-note">แก้ไขราคา/หน่วยแล้วระบบจะอัปเดตให้อัตโนมัติทั้งในรายการที่บันทึกไปแล้วและรายการใหม่</div>' +
           "</form>" +
           '<div class="wt-filter-row" style="margin-top:14px;">' +
             '<input class="wt-search-input" id="productSearchField" placeholder="ค้นหาสินค้า (ชื่อ/รหัส)" value="' + esc(state.productSearch) + '">' +
@@ -1005,6 +1007,7 @@
   }
   function showFormError(msg) { var el = document.getElementById("formError"); if (el) el.textContent = msg; }
   function showProductFormError(msg) { var el = document.getElementById("productFormError"); if (el) el.textContent = msg; }
+  function showProductFormNote(msg) { var el = document.getElementById("productFormNote"); if (el) el.textContent = msg; }
 
   function handleSelectProduct(select) {
     var product = state.settings.products.find(function (p) { return p.id === select.value; });
@@ -1042,7 +1045,7 @@
 
     var entry = {
       id: entryId,
-      date: date, productName: product.name, productCode: product.code,
+      date: date, productId: product.id, productName: product.name, productCode: product.code,
       type: type, quantity: quantity, unit: product.unit, unitPrice: unitPrice,
       totalAmount: quantity * unitPrice, line: line, method: method, note: note, rootCause: rootCause,
       photos: photos,
@@ -1120,15 +1123,46 @@
     showProductFormError("");
     if (!name) return showProductFormError("กรุณาระบุชื่อสินค้า");
     var finalCode = code || nextAutoCode();
+    var syncedCount = 0;
     if (state.editingProductId) {
       var idx = state.settings.products.findIndex(function (p) { return p.id === state.editingProductId; });
-      if (idx > -1) state.settings.products[idx] = Object.assign({}, state.settings.products[idx], { code: finalCode, name: name, unit: unit, price: price });
+      if (idx > -1) {
+        var oldProduct = state.settings.products[idx];
+        var newProduct = Object.assign({}, oldProduct, { code: finalCode, name: name, unit: unit, price: price });
+        state.settings.products[idx] = newProduct;
+        var changed = oldProduct.price !== price || oldProduct.unit !== unit || oldProduct.name !== name || oldProduct.code !== finalCode;
+        if (changed) syncedCount = syncEntriesToProduct(oldProduct, newProduct);
+      }
     } else {
       state.settings.products.push({ id: uid(), code: finalCode, name: name, unit: unit, price: price });
     }
     saveSettings();
     state.editingProductId = null;
     render();
+    if (syncedCount) showProductFormNote("อัปเดตราคา/หน่วยให้อัตโนมัติแล้ว " + syncedCount + " รายการที่เคยบันทึกไว้");
+  }
+
+  // Entries store a snapshot of product name/code/unit/price at the time they
+  // were recorded. When a product's price (or unit/name/code) is edited in
+  // Settings, re-link and refresh every affected entry — past and future —
+  // so the ledger always reflects the current product record rather than a
+  // stale snapshot. Matches by productId when present, falling back to the
+  // product's old code for entries saved before productId existed. Returns
+  // the number of entries updated.
+  function syncEntriesToProduct(oldProduct, newProduct) {
+    var affected = state.entries.filter(function (en) {
+      return en.productId ? en.productId === newProduct.id : en.productCode === oldProduct.code;
+    });
+    affected.forEach(function (en) {
+      en.productId = newProduct.id;
+      en.productName = newProduct.name;
+      en.productCode = newProduct.code;
+      en.unit = newProduct.unit;
+      en.unitPrice = newProduct.price;
+      en.totalAmount = (en.quantity || 0) * newProduct.price;
+      persistEntry(en).catch(function (err) { console.error("sync entry failed", err); });
+    });
+    return affected.length;
   }
 
   function handleSubmitCompany(e) {
