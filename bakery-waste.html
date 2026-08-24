@@ -8,43 +8,44 @@
   @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
   :root {
-    --bg: #171310; --surface: #211A15; --surface-2: #2A211A; --border: #3A2E22;
-    --text: #F1E8DD; --text-muted: #A6968A; --accent: #C98A4B; --accent-dim: #5B4127;
-    --money: #E0B65C; --warn: #D08A3E; --danger: #B2554A;
+    --bg: #1A1611; --surface: #241D17; --surface-2: #2E241C; --border: #3D3125;
+    --text: #F4ECE1; --text-muted: #B0A090; --accent: #D99A5B; --accent-dim: #5F4530;
+    --accent-soft: #E8C08A; --money: #EAC372; --warn: #E0993F; --danger: #C4695A; --good: #7FAE7A;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
     font-family: 'IBM Plex Sans Thai', sans-serif;
-    background: #0E0B09;
+    background: radial-gradient(ellipse at top, #17120D 0%, #0D0A08 65%);
     color: var(--text);
     min-height: 100vh;
-    padding: 24px 16px;
+    padding: 28px 20px;
   }
   .wt-mono { font-family: 'IBM Plex Mono', monospace; }
 
-  #app { max-width: 1180px; margin: 0 auto; background: var(--bg); border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
+  #app { max-width: 1560px; width: 100%; margin: 0 auto; background: var(--bg); border-radius: 14px; overflow: hidden; border: 1px solid var(--border); box-shadow: 0 20px 60px -20px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.02); }
+  @media (max-width: 1620px) { #app { max-width: 96vw; } }
 
-  .wt-header { padding: 22px 24px 16px; border-bottom: 1px solid var(--border); background: linear-gradient(180deg, #1D1712 0%, #171310 100%); }
+  .wt-header { padding: 24px 28px 18px; border-bottom: 1px solid var(--border); background: linear-gradient(180deg, #201811 0%, #1A1611 100%); }
   .wt-eyebrow { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.14em; color: var(--accent); text-transform: uppercase; display: flex; align-items: center; gap: 8px; }
   .wt-eyebrow::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
   .wt-title { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 30px; margin: 4px 0 14px; }
   .wt-tabs { display: flex; gap: 6px; }
-  .wt-tab { font-size: 14px; font-weight: 600; padding: 9px 16px; border-radius: 7px 7px 0 0; background: transparent; border: 1px solid transparent; color: var(--text-muted); cursor: pointer; font-family: inherit; }
+  .wt-tab { font-size: 14px; font-weight: 600; padding: 10px 18px; border-radius: 8px 8px 0 0; background: transparent; border: 1px solid transparent; color: var(--text-muted); cursor: pointer; font-family: inherit; transition: color .15s ease, background .15s ease; }
   .wt-tab.active { color: var(--text); background: var(--surface); border-color: var(--border); border-bottom-color: var(--surface); }
-  .wt-tab:hover:not(.active) { color: var(--text); }
+  .wt-tab:hover:not(.active) { color: var(--accent-soft); }
 
-  .wt-body { padding: 20px 24px 28px; background: var(--surface); }
+  .wt-body { padding: 24px 28px 32px; background: var(--surface); }
 
-  .wt-entry-grid { display: grid; grid-template-columns: 360px 1fr; gap: 20px; }
+  .wt-entry-grid { display: grid; grid-template-columns: 380px 1fr; gap: 22px; }
   @media (max-width: 780px) { .wt-entry-grid { grid-template-columns: 1fr; } }
 
-  .wt-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
-  .wt-card h3 { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; margin: 0 0 14px; border-left: 3px solid var(--accent); padding-left: 9px; }
+  .wt-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset; }
+  .wt-card h3 { font-family: 'Barlow Condensed', sans-serif; font-size: 18px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; margin: 0 0 14px; border-left: 3px solid var(--accent); padding-left: 9px; color: var(--accent-soft); }
   .wt-field { margin-bottom: 12px; }
   .wt-field label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 5px; font-weight: 500; }
-  .wt-field input, .wt-field select, .wt-field textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 9px 10px; font-size: 14px; font-family: 'IBM Plex Sans Thai', sans-serif; outline: none; }
-  .wt-field input:focus, .wt-field select:focus, .wt-field textarea:focus { border-color: var(--accent); }
+  .wt-field input, .wt-field select, .wt-field textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 7px; padding: 9px 11px; font-size: 14px; font-family: 'IBM Plex Sans Thai', sans-serif; outline: none; transition: border-color .15s ease, box-shadow .15s ease; }
+  .wt-field input:focus, .wt-field select:focus, .wt-field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
   .wt-field input:disabled { opacity: 0.6; }
   .wt-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
   .wt-link { color: var(--accent); cursor: pointer; text-decoration: underline; background: none; border: none; padding: 0; font-size: 11px; font-family: inherit; }
@@ -66,8 +67,9 @@
   .wt-photo-preview:nth-child(even) img { transform: rotate(1.5deg); }
   .wt-photo-remove { position: absolute; top: -8px; right: -8px; background: var(--danger); color: #fff; border: none; border-radius: 50%; width: 20px; height: 20px; font-size: 11px; cursor: pointer; line-height: 1; }
 
-  .wt-submit { width: 100%; background: var(--accent); color: #1D1508; font-weight: 700; border: none; border-radius: 7px; padding: 11px; font-size: 14.5px; cursor: pointer; margin-top: 4px; font-family: inherit; }
-  .wt-submit:hover { filter: brightness(1.1); }
+  .wt-submit { width: 100%; background: linear-gradient(180deg, var(--accent-soft), var(--accent)); color: #1D1508; font-weight: 700; border: none; border-radius: 8px; padding: 11px; font-size: 14.5px; cursor: pointer; margin-top: 4px; font-family: inherit; transition: filter .15s ease, transform .1s ease; }
+  .wt-submit:hover { filter: brightness(1.08); }
+  .wt-submit:active { transform: translateY(1px); }
   .wt-submit:disabled { opacity: 0.5; cursor: not-allowed; }
   .wt-save-state { font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 8px; font-family: 'IBM Plex Mono', monospace; min-height: 14px; }
 
@@ -80,11 +82,14 @@
   .wt-csv-btn:hover { color: var(--text); border-color: var(--accent); }
   .wt-csv-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  .wt-table-wrap { overflow-x: auto; max-height: 560px; overflow-y: auto; }
+  .wt-table-wrap { overflow-x: auto; max-height: 560px; overflow-y: auto; border-radius: 8px; }
   table.wt-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-  table.wt-table thead th { text-align: left; font-weight: 600; color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 8px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface-2); }
-  table.wt-table td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-  table.wt-table tr:hover td { background: rgba(255,255,255,0.02); }
+  table.wt-table thead th { text-align: left; font-weight: 600; color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; padding: 9px 8px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface-2); }
+  table.wt-table td { padding: 9px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  table.wt-table tr:hover td { background: rgba(255,255,255,0.035); }
+  .wt-sortable-th { cursor: pointer; user-select: none; white-space: nowrap; }
+  .wt-sortable-th:hover { color: var(--accent-soft); }
+  .wt-sort-arrow { font-size: 9px; margin-left: 3px; opacity: 0.75; }
   .wt-tag { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; white-space: nowrap; }
   .wt-thumb { width: 34px; height: 34px; object-fit: cover; border-radius: 5px; cursor: pointer; border: 1px solid var(--border); }
   .wt-thumb-wrap { position: relative; width: 34px; height: 34px; }
@@ -101,7 +106,8 @@
 
   .wt-stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
   @media (max-width: 700px) { .wt-stat-row { grid-template-columns: 1fr; } }
-  .wt-stat { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+  .wt-stat { background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; padding: 16px 18px; transition: transform .12s ease, border-color .12s ease; }
+  .wt-stat:hover { transform: translateY(-2px); border-color: var(--accent-dim); }
   .wt-stat .lbl { font-size: 11.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; font-family: 'IBM Plex Mono', monospace; }
   .wt-stat .val { font-family: 'Barlow Condensed', sans-serif; font-size: 32px; font-weight: 700; margin-top: 4px; color: var(--money); }
   .wt-stat .val span { font-size: 15px; color: var(--text-muted); font-family: 'IBM Plex Sans Thai', sans-serif; font-weight: 500; margin-left: 4px; }
@@ -242,7 +248,10 @@
     ledgerDateFrom: "",
     ledgerDateTo: "",
     rangeStart: daysAgo(29),
-    rangeEnd: todayStr()
+    rangeEnd: todayStr(),
+    productSearch: "",
+    productSortDir: "asc",
+    confirmDeleteProductId: null
   };
 
   function findWasteType(id) {
@@ -447,7 +456,8 @@
       "</div>" +
       renderLightbox() +
       renderPrintModal() +
-      renderDeleteConfirmModal();
+      renderDeleteConfirmModal() +
+      renderDeleteConfirmProductModal();
     updateSaveIndicator();
   }
 
@@ -524,6 +534,62 @@
         "</div>" +
       "</div>"
     );
+  }
+
+  function renderDeleteConfirmProductModal() {
+    if (!state.confirmDeleteProductId) return "";
+    var p = state.settings.products.find(function (x) { return x.id === state.confirmDeleteProductId; });
+    var desc = p ? esc(p.name) + (p.code ? " (" + esc(p.code) + ")" : "") : "";
+    return (
+      '<div class="wt-lightbox" data-action="cancelDeleteProduct" style="align-items:flex-start;padding-top:60px;">' +
+        '<div class="wt-card" style="width:320px;max-width:90vw;text-align:left;">' +
+          "<h3>ยืนยันการลบสินค้า</h3>" +
+          '<div style="margin:6px 0 16px;color:var(--text-muted);">ต้องการลบสินค้า' + (desc ? " " + desc : "") + " นี้ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้" + "</div>" +
+          '<button class="wt-submit" type="button" data-action="confirmDeleteProduct" style="background:var(--danger);border-color:var(--danger);">ลบสินค้า</button>' +
+          '<button class="wt-cancel-link" type="button" data-action="cancelDeleteProduct" style="display:block;text-align:center;width:100%;margin-top:10px;">ยกเลิก</button>' +
+        "</div>" +
+      "</div>"
+    );
+  }
+
+  function getFilteredSortedProducts() {
+    var q = state.productSearch.trim().toLowerCase();
+    var dir = state.productSortDir === "desc" ? -1 : 1;
+    return state.settings.products
+      .filter(function (p) {
+        if (!q) return true;
+        var hay = [p.name, p.code].join(" ").toLowerCase();
+        return hay.indexOf(q) !== -1;
+      })
+      .sort(function (a, b) { return dir * String(a.code || "").localeCompare(String(b.code || ""), "th", { numeric: true }); });
+  }
+
+  function renderProductRowsHtml() {
+    var visibleProducts = getFilteredSortedProducts();
+    var sortArrow = state.productSortDir === "desc" ? "▼" : "▲";
+    if (state.settings.products.length === 0) return '<div class="wt-empty">ยังไม่มีสินค้า — เพิ่มรายการแรกด้านบน</div>';
+    if (visibleProducts.length === 0) return '<div class="wt-empty">ไม่พบสินค้าที่ตรงกับคำค้นหา</div>';
+    return '<table class="wt-table"><thead><tr>' +
+      '<th class="wt-sortable-th" data-action="toggleProductSort">รหัส <span class="wt-sort-arrow">' + sortArrow + '</span></th>' +
+      "<th>ชื่อสินค้า</th><th>หน่วย</th><th>ราคา/หน่วย</th><th></th></tr></thead><tbody>" +
+      visibleProducts.map(function (p) {
+        return "<tr>" +
+          '<td class="wt-mono">' + esc(p.code) + "</td>" +
+          "<td>" + esc(p.name) + "</td>" +
+          "<td>" + esc(p.unit) + "</td>" +
+          '<td class="wt-mono">' + fmtBaht(p.price) + " บ.</td>" +
+          '<td style="display:flex;gap:6px;"><button class="wt-edit-btn" data-action="editProduct" data-id="' + p.id + '">แก้ไข</button>' +
+          '<button class="wt-del" data-action="deleteProduct" data-id="' + p.id + '">✕</button></td>' +
+          "</tr>";
+      }).join("") + "</tbody></table>";
+  }
+
+  function updateProductsTable() {
+    var wrap = document.getElementById("productTableWrap");
+    if (wrap) wrap.innerHTML = renderProductRowsHtml();
+    var clearWrap = document.getElementById("productSearchClearWrap");
+    if (clearWrap) clearWrap.innerHTML = state.productSearch
+      ? '<button type="button" class="wt-csv-btn" data-action="clearProductSearch">ล้าง</button>' : "";
   }
 
   function getFilteredLedgerEntries() {
@@ -824,19 +890,7 @@
       return '<option value="' + u + '"' + (editing && editing.unit === u ? " selected" : "") + ">" + u + "</option>";
     }).join("");
 
-    var productRows = state.settings.products.length === 0
-      ? '<div class="wt-empty">ยังไม่มีสินค้า — เพิ่มรายการแรกด้านบน</div>'
-      : '<table class="wt-table"><thead><tr><th>รหัส</th><th>ชื่อสินค้า</th><th>หน่วย</th><th>ราคา/หน่วย</th><th></th></tr></thead><tbody>' +
-        state.settings.products.map(function (p) {
-          return "<tr>" +
-            '<td class="wt-mono">' + esc(p.code) + "</td>" +
-            "<td>" + esc(p.name) + "</td>" +
-            "<td>" + esc(p.unit) + "</td>" +
-            '<td class="wt-mono">' + fmtBaht(p.price) + " บ.</td>" +
-            '<td style="display:flex;gap:6px;"><button class="wt-edit-btn" data-action="editProduct" data-id="' + p.id + '">แก้ไข</button>' +
-            '<button class="wt-del" data-action="deleteProduct" data-id="' + p.id + '">✕</button></td>' +
-            "</tr>";
-        }).join("") + "</tbody></table>";
+    var productRows = renderProductRowsHtml();
 
     var lineChips = state.settings.lines.length === 0
       ? '<div class="wt-empty" style="padding:8px 0;">ยังไม่มีรายการ</div>'
@@ -891,7 +945,11 @@
             '<div class="wt-error" id="productFormError"></div>' +
             (editing ? '<button type="button" class="wt-cancel-link" data-action="cancelEditProduct">ยกเลิกการแก้ไข</button>' : "") +
           "</form>" +
-          '<div class="wt-table-wrap" style="margin-top:14px;">' + productRows + "</div>" +
+          '<div class="wt-filter-row" style="margin-top:14px;">' +
+            '<input class="wt-search-input" id="productSearchField" placeholder="ค้นหาสินค้า (ชื่อ/รหัส)" value="' + esc(state.productSearch) + '">' +
+            '<span id="productSearchClearWrap">' + (state.productSearch ? '<button type="button" class="wt-csv-btn" data-action="clearProductSearch">ล้าง</button>' : "") + "</span>" +
+          "</div>" +
+          '<div class="wt-table-wrap" id="productTableWrap">' + productRows + "</div>" +
         "</div>" +
 
         '<div class="wt-settings-row">' +
@@ -1172,11 +1230,23 @@
       case "editProduct": state.editingProductId = el.getAttribute("data-id"); render(); break;
       case "cancelEditProduct": state.editingProductId = null; render(); break;
       case "deleteProduct":
-        var pid = el.getAttribute("data-id");
-        state.settings.products = state.settings.products.filter(function (p) { return p.id !== pid; });
-        saveSettings();
-        if (state.editingProductId === pid) state.editingProductId = null;
+        state.confirmDeleteProductId = el.getAttribute("data-id");
         render(); break;
+      case "confirmDeleteProduct":
+        var delPid = state.confirmDeleteProductId;
+        state.confirmDeleteProductId = null;
+        state.settings.products = state.settings.products.filter(function (p) { return p.id !== delPid; });
+        saveSettings();
+        if (state.editingProductId === delPid) state.editingProductId = null;
+        render(); break;
+      case "cancelDeleteProduct":
+        if (e.target === el) { state.confirmDeleteProductId = null; render(); }
+        break;
+      case "toggleProductSort":
+        state.productSortDir = state.productSortDir === "desc" ? "asc" : "desc";
+        render(); break;
+      case "clearProductSearch":
+        state.productSearch = ""; render(); break;
       case "removeLine":
         state.settings.lines = state.settings.lines.filter(function (l) { return l !== el.getAttribute("data-value"); });
         saveSettings(); render(); break;
@@ -1228,6 +1298,7 @@
     if (e.target.hasAttribute("data-live-total")) updateTotalDisplay();
     if (e.target.hasAttribute("data-live-status")) updateStatusPreview();
     if (e.target.id === "ledgerSearchField") { state.ledgerSearch = e.target.value; updateLedgerTable(); }
+    if (e.target.id === "productSearchField") { state.productSearch = e.target.value; updateProductsTable(); }
   });
 
   document.getElementById("app").addEventListener("keydown", function (e) {
