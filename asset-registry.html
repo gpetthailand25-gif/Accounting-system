@@ -260,9 +260,12 @@ function dashboardHtml(){
         <div style="font-weight:500;">${escapeHtml(i.name||'(ไม่ระบุชื่อ)')}${docs[i.id] ? ' <span title="มีไฟล์เอกสารแนบ" style="font-size:12px;">📎</span>' : ''}</div>
         <div style="font-size:12px;color:var(--ink-soft);">${escapeHtml(i.code||'-')}</div>
       </td>
+      <td>${escapeHtml(i.brand||'-')} / ${escapeHtml(i.model||'-')}</td>
+      <td>${escapeHtml(i.qty ?? '-')}</td>
       <td>${escapeHtml(i.location||'-')}</td>
       <td>${fmtDate(i.purchaseDate)}</td>
       <td>${fmtMoney(i.value)}</td>
+      <td>${escapeHtml(i.note||'-')}</td>
     </tr>`).join('');
 
   const alreadyImported = items.some(i => i.importSource === IMPORT_SOURCE_TAG);
@@ -297,7 +300,7 @@ function dashboardHtml(){
       </div>
     ` : `
       <table>
-        <thead><tr><th></th><th>รายการ</th><th>สถานที่</th><th>วันที่ซื้อ</th><th>มูลค่า</th></tr></thead>
+        <thead><tr><th></th><th>รายการ</th><th>ยี่ห้อ / รุ่น</th><th>จำนวน</th><th>สถานที่</th><th>วันที่ซื้อ</th><th>มูลค่า</th><th>หมายเหตุ</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     `}
