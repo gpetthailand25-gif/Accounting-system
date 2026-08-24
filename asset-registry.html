@@ -114,6 +114,152 @@ function exportItemsToExcel(){
   XLSX.writeFile(wb, `ทะเบียนทรัพย์สิน_${todayStr()}.xlsx`);
 }
 
+const CSV_HEADERS = ['หมวดหมู่','รหัสทรัพย์สิน','ชื่อรายการ','สถานที่','วันที่ซื้อ','จำนวน','มูลค่า','ยี่ห้อ','รุ่น','เลขซีเรียล','ผู้จำหน่าย','ผู้รับผิดชอบ','หมายเหตุ'];
+
+function csvEscape(val){
+  const s = (val === null || val === undefined) ? '' : String(val);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function downloadCsvTemplate(){
+  const exampleRows = CATEGORIES.map(cat => ([
+    cat.label, '', 'ตัวอย่าง เช่น เก้าอี้สำนักงาน', 'ตัวอย่าง เช่น ชั้น 2', '2026-01-15', '1', '1500', '', '', '', '', '', ''
+  ]));
+  const lines = [CSV_HEADERS.join(',')].concat(exampleRows.map(r => r.map(csvEscape).join(',')));
+  const csvContent = '\uFEFF' + lines.join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `เท็มเพลทนำเข้าทรัพย์สิน_${todayStr()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function parseCSV(text){
+  // Strip BOM
+  if(text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for(let i = 0; i < text.length; i++){
+    const c = text[i], next = text[i+1];
+    if(inQuotes){
+      if(c === '"' && next === '"'){ field += '"'; i++; }
+      else if(c === '"'){ inQuotes = false; }
+      else { field += c; }
+    } else {
+      if(c === '"'){ inQuotes = true; }
+      else if(c === ','){ row.push(field); field = ''; }
+      else if(c === '\r'){ /* ignore, handled by \n */ }
+      else if(c === '\n'){ row.push(field); rows.push(row); row = []; field = ''; }
+      else { field += c; }
+    }
+  }
+  if(field.length || row.length){ row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(f => String(f).trim() !== ''));
+}
+
+function findCategoryKey(raw){
+  const val = String(raw || '').trim();
+  if(!val) return null;
+  const byKey = CATEGORIES.find(c => c.key === val);
+  if(byKey) return byKey.key;
+  const byLabel = CATEGORIES.find(c => c.label === val || c.label.trim() === val);
+  if(byLabel) return byLabel.key;
+  const byPrefix = CATEGORIES.find(c => c.prefix === val);
+  if(byPrefix) return byPrefix.key;
+  return null;
+}
+
+function readTextFile(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ'));
+    reader.onload = () => resolve(reader.result);
+    reader.readAsText(file, 'UTF-8');
+  });
+}
+
+async function handleCsvImport(file){
+  let text;
+  try{ text = await readTextFile(file); }
+  catch(e){ alert('อ่านไฟล์ไม่สำเร็จ'); return; }
+
+  const rows = parseCSV(text);
+  if(rows.length < 2){ alert('ไม่พบข้อมูลในไฟล์ CSV'); return; }
+
+  const header = rows[0].map(h => String(h).trim());
+  const idx = {};
+  CSV_HEADERS.forEach(h => { idx[h] = header.indexOf(h); });
+  if(idx['หมวดหมู่'] === -1 || idx['ชื่อรายการ'] === -1){
+    alert('รูปแบบไฟล์ CSV ไม่ถูกต้อง กรุณาใช้เท็มเพลทที่ระบบจัดให้');
+    return;
+  }
+
+  // track next auto-code counter per category so a batch of rows without
+  // an explicit code each get a unique, sequential code
+  const codeCounters = {};
+  CATEGORIES.forEach(cat => {
+    let max = 0;
+    items.filter(i => i.category === cat.key).forEach(i => {
+      const m = (i.code||'').match(new RegExp('^' + cat.prefix + '-(\\d+)$'));
+      if(m) max = Math.max(max, parseInt(m[1], 10));
+    });
+    codeCounters[cat.key] = max;
+  });
+
+  const newItems = [];
+  const errors = [];
+  rows.slice(1).forEach((r, n) => {
+    const get = (h) => idx[h] !== -1 && idx[h] !== undefined ? (r[idx[h]] || '').trim() : '';
+    const catRaw = get('หมวดหมู่');
+    const name = get('ชื่อรายการ');
+    const category = findCategoryKey(catRaw);
+    if(!category){ errors.push(`แถวที่ ${n+2}: ไม่พบหมวดหมู่ "${catRaw}"`); return; }
+    if(!name){ errors.push(`แถวที่ ${n+2}: ไม่ได้ระบุชื่อรายการ`); return; }
+    const qtyRaw = get('จำนวน');
+    const valueRaw = get('มูลค่า');
+    let code = get('รหัสทรัพย์สิน');
+    if(!code){
+      const cat = CATEGORIES.find(c => c.key === category);
+      codeCounters[category] = (codeCounters[category] || 0) + 1;
+      code = `${cat.prefix}-${String(codeCounters[category]).padStart(4,'0')}`;
+    }
+    newItems.push({
+      id: uid(),
+      createdAt: todayStr(),
+      category,
+      code,
+      name,
+      location: get('สถานที่') || null,
+      purchaseDate: get('วันที่ซื้อ') || null,
+      qty: qtyRaw ? Number(qtyRaw) : null,
+      value: valueRaw ? Number(valueRaw.replace(/,/g,'')) : null,
+      brand: get('ยี่ห้อ') || null,
+      model: get('รุ่น') || null,
+      serialNo: get('เลขซีเรียล') || null,
+      supplier: get('ผู้จำหน่าย') || null,
+      responsible: get('ผู้รับผิดชอบ') || null,
+      note: get('หมายเหตุ') || null
+    });
+  });
+
+  if(newItems.length === 0){
+    alert('ไม่สามารถนำเข้าข้อมูลได้:\n' + errors.join('\n'));
+    return;
+  }
+
+  items = items.concat(newItems);
+  await saveItems();
+  render();
+
+  let msg = `นำเข้าสำเร็จ ${newItems.length.toLocaleString('th-TH')} รายการ`;
+  if(errors.length) msg += `\n\nข้ามไป ${errors.length} แถว:\n` + errors.join('\n');
+  alert(msg);
+}
+
 async function loadData(){
   try{
     const r = await window.storage.get(STORAGE_KEY_ITEMS);
@@ -289,6 +435,9 @@ function dashboardHtml(){
   <div class="toolbar">
     <input type="text" id="searchInput" placeholder="ค้นหาชื่อ รหัส ยี่ห้อ รุ่น หรือสถานที่" value="${escapeAttr(q)}">
     <button class="btn" id="btnExportExcel">⬇ Export Excel</button>
+    <button class="btn" id="btnCsvTemplate">⬇ เท็มเพลท CSV</button>
+    <button class="btn" id="btnCsvImport">⬆ นำเข้า CSV</button>
+    <input type="file" id="csvImportInput" accept=".csv" style="display:none;">
     <button class="btn btn-primary" id="btnAddItem">+ เพิ่มรายการ</button>
   </div>
 
@@ -472,6 +621,18 @@ function attachHandlers(){
   if(btnImportEquipment) btnImportEquipment.addEventListener('click', () => importFromExcel());
   const btnExportExcel = document.getElementById('btnExportExcel');
   if(btnExportExcel) btnExportExcel.addEventListener('click', () => exportItemsToExcel());
+  const btnCsvTemplate = document.getElementById('btnCsvTemplate');
+  if(btnCsvTemplate) btnCsvTemplate.addEventListener('click', () => downloadCsvTemplate());
+  const btnCsvImport = document.getElementById('btnCsvImport');
+  const csvImportInput = document.getElementById('csvImportInput');
+  if(btnCsvImport && csvImportInput){
+    btnCsvImport.addEventListener('click', () => csvImportInput.click());
+    csvImportInput.addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if(file) await handleCsvImport(file);
+      csvImportInput.value = '';
+    });
+  }
 
   const imageInput = document.getElementById('imageInput');
   if(imageInput){
