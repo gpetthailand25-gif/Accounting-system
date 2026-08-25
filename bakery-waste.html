@@ -46,6 +46,14 @@
   .wt-field { margin-bottom: 12px; }
   .wt-field label { display: block; font-size: 12.5px; color: var(--text-muted); margin-bottom: 5px; font-weight: 600; }
   .wt-field input, .wt-field select, .wt-field textarea { width: 100%; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 7px; padding: 9px 11px; font-size: 16px; font-family: 'IBM Plex Sans Thai', sans-serif; outline: none; transition: border-color .15s ease, box-shadow .15s ease; }
+
+  .wt-combo { position: relative; }
+  .wt-combo-list { position: absolute; z-index: 40; top: calc(100% + 4px); left: 0; right: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 10px 24px -8px rgba(120,90,20,0.3); max-height: 220px; overflow-y: auto; }
+  .wt-combo-item { padding: 8px 11px; cursor: pointer; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .wt-combo-item:hover, .wt-combo-item.active { background: var(--accent-dim); }
+  .wt-combo-item .name { color: var(--text); }
+  .wt-combo-item .code { color: var(--text-muted); font-family: 'IBM Plex Mono', monospace; font-size: 11px; flex-shrink: 0; }
+  .wt-combo-empty { padding: 10px 11px; font-size: 12.5px; color: var(--text-muted); }
   .wt-field input:focus, .wt-field select:focus, .wt-field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
   .wt-field input:disabled { opacity: 0.6; }
   .wt-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
@@ -104,6 +112,7 @@
   .wt-prod-code { color: var(--text-muted); font-size: 11px; }
   .wt-run-no { color: var(--accent-soft); font-weight: 700; white-space: nowrap; }
   .wt-rootcause-cell { max-width: 220px; white-space: normal; font-size: 12px; line-height: 1.5; color: var(--text); }
+  .wt-wrap-cell { max-width: 220px; white-space: normal; font-size: 12px; line-height: 1.5; color: var(--text); }
 
   .wt-stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
   @media (max-width: 700px) { .wt-stat-row { grid-template-columns: 1fr; } }
@@ -230,6 +239,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-storage-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
   var firebaseConfig = {
     apiKey: "AIzaSyCBqLLruYcutKwHXaD4ZJVtJZIAd_cgno4",
@@ -258,8 +268,8 @@
   };
   // tabs each role is allowed to see ("accounting" sees everything)
   var ROLE_ALLOWED_TABS = {
-    accounting: ["entry", "dashboard", "settings"],
-    production: ["entry", "dashboard"]
+    accounting: ["entry", "production", "dashboard", "settings"],
+    production: ["entry", "production", "dashboard"]
   };
   var ROLE_LABELS = { accounting: "ฝ่ายบัญชี", production: "ฝ่ายโปรดักชั่น" };
   var DEFAULT_SETTINGS = {
@@ -310,7 +320,19 @@
     rangeEnd: todayStr(),
     productSearch: "",
     productSortDir: "asc",
-    confirmDeleteProductId: null
+    confirmDeleteProductId: null,
+    // -- production issue log tab --
+    productionLogs: [],
+    editingProdLogId: null,
+    pendingProdPhotos: [],
+    prodPhotoBusy: false,
+    confirmDeleteProdLogId: null,
+    prodLogSearch: "",
+    prodLogDateFrom: "",
+    prodLogDateTo: "",
+    prodFormDefaults: { date: todayStr() },
+    prodLightboxLogId: null,
+    prodLightboxIndex: 0
   };
 
   function findWasteType(id) {
@@ -367,12 +389,13 @@
   // ---------- persistence (Firebase Firestore + Storage) ----------
   var saveState = "idle", settingsSaveState = "idle";
   var entriesCol = fbDb.collection("entries");
+  var productionLogsCol = fbDb.collection("productionLogs");
   var settingsDocRef = fbDb.collection("meta").doc("settings");
-  var entriesLoaded = false, settingsLoaded = false;
+  var entriesLoaded = false, settingsLoaded = false, productionLogsLoaded = false;
   var firestoreSyncStarted = false;
 
   function startAppAfterLogin() {
-    if (entriesLoaded && settingsLoaded) { render(); return; }
+    if (entriesLoaded && settingsLoaded && productionLogsLoaded) { render(); return; }
     document.getElementById("app").innerHTML = '<div class="wt-empty-page">กำลังเชื่อมต่อฐานข้อมูล…</div>';
     if (firestoreSyncStarted) return; // listeners already attached; render() fires once data arrives
     firestoreSyncStarted = true;
@@ -412,9 +435,23 @@
       console.error("entries sync error", err);
       document.getElementById("app").innerHTML = '<div class="wt-empty-page">เชื่อมต่อฐานข้อมูลไม่สำเร็จ: ' + esc(err.message) + "</div>";
     });
+
+    productionLogsCol.onSnapshot(function (snapshot) {
+      state.productionLogs = snapshot.docs.map(function (d) {
+        var data = d.data();
+        data.id = d.id;
+        if (!data.photos) data.photos = [];
+        return data;
+      });
+      productionLogsLoaded = true;
+      maybeRenderReady();
+    }, function (err) {
+      console.error("production logs sync error", err);
+      document.getElementById("app").innerHTML = '<div class="wt-empty-page">เชื่อมต่อฐานข้อมูลไม่สำเร็จ: ' + esc(err.message) + "</div>";
+    });
   }
   function maybeRenderReady() {
-    if (entriesLoaded && settingsLoaded) render();
+    if (entriesLoaded && settingsLoaded && productionLogsLoaded) render();
   }
 
   function saveSettings() {
@@ -436,6 +473,20 @@
     saveState = "saving";
     updateSaveIndicator();
     entriesCol.doc(id).delete()
+      .then(function () { saveState = "saved"; updateSaveIndicator(); })
+      .catch(function (err) { console.error(err); saveState = "error"; updateSaveIndicator(); });
+  }
+  function persistProdLog(log) {
+    saveState = "saving";
+    updateSaveIndicator();
+    return productionLogsCol.doc(log.id).set(log)
+      .then(function () { saveState = "saved"; updateSaveIndicator(); })
+      .catch(function (err) { saveState = "error"; updateSaveIndicator(); throw err; });
+  }
+  function deleteProdLogRemote(id) {
+    saveState = "saving";
+    updateSaveIndicator();
+    productionLogsCol.doc(id).delete()
       .then(function () { saveState = "saved"; updateSaveIndicator(); })
       .catch(function (err) { console.error(err); saveState = "error"; updateSaveIndicator(); });
   }
@@ -511,12 +562,15 @@
       renderHeader() +
       '<div class="wt-body">' +
         (state.tab === "entry" ? renderEntryTab() :
+         state.tab === "production" ? renderProductionTab() :
          state.tab === "dashboard" ? renderDashboardTab() : renderSettingsTab()) +
       "</div>" +
       renderLightbox() +
+      renderProdLightbox() +
       renderPrintModal() +
       renderDeleteConfirmModal() +
-      renderDeleteConfirmProductModal();
+      renderDeleteConfirmProductModal() +
+      renderDeleteConfirmProdLogModal();
     updateSaveIndicator();
   }
 
@@ -538,6 +592,7 @@
         '<div class="wt-title">Bakery Waste Manifest</div>' +
         '<div class="wt-tabs">' +
           tabBtn("entry", "บันทึกข้อมูล") +
+          tabBtn("production", "บันทึก Productions") +
           tabBtn("dashboard", "แดชบอร์ด &amp; รายงาน") +
           tabBtn("settings", "⚙ ตั้งค่า") +
         "</div>" +
@@ -559,6 +614,23 @@
       : "";
     return '<div class="wt-lightbox" data-action="closeLightbox">' +
       '<img src="' + photos[idx] + '" alt="รูปของเสีย">' + nav +
+      "</div>";
+  }
+
+  function renderProdLightbox() {
+    if (!state.prodLightboxLogId) return "";
+    var log = state.productionLogs.find(function (p) { return p.id === state.prodLightboxLogId; });
+    if (!log) return "";
+    var photos = log.photos || [];
+    if (!photos.length) return "";
+    var idx = Math.max(0, Math.min(state.prodLightboxIndex, photos.length - 1));
+    var nav = photos.length > 1
+      ? '<button class="wt-lb-nav wt-lb-prev" data-action="prodLightboxPrev">‹</button>' +
+        '<button class="wt-lb-nav wt-lb-next" data-action="prodLightboxNext">›</button>' +
+        '<div class="wt-lb-count">' + (idx + 1) + " / " + photos.length + "</div>"
+      : "";
+    return '<div class="wt-lightbox" data-action="closeProdLightbox">' +
+      '<img src="' + photos[idx] + '" alt="รูปปัญหาการผลิต">' + nav +
       "</div>";
   }
 
@@ -606,6 +678,22 @@
           '<div style="margin:6px 0 16px;color:var(--text-muted);">ต้องการลบสินค้า' + (desc ? " " + desc : "") + " นี้ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้" + "</div>" +
           '<button class="wt-submit" type="button" data-action="confirmDeleteProduct" style="background:var(--danger);border-color:var(--danger);">ลบสินค้า</button>' +
           '<button class="wt-cancel-link" type="button" data-action="cancelDeleteProduct" style="display:block;text-align:center;width:100%;margin-top:10px;">ยกเลิก</button>' +
+        "</div>" +
+      "</div>"
+    );
+  }
+
+  function renderDeleteConfirmProdLogModal() {
+    if (!state.confirmDeleteProdLogId) return "";
+    var p = state.productionLogs.find(function (x) { return x.id === state.confirmDeleteProdLogId; });
+    var desc = p ? esc(p.date) + (p.item ? " · " + esc(p.item.slice(0, 40)) : "") : "";
+    return (
+      '<div class="wt-lightbox" data-action="cancelDeleteProdLog" style="align-items:flex-start;padding-top:60px;">' +
+        '<div class="wt-card" style="width:320px;max-width:90vw;text-align:left;">' +
+          "<h3>ยืนยันการลบรายการ</h3>" +
+          '<div style="margin:6px 0 16px;color:var(--text-muted);">ต้องการลบรายการ' + (desc ? " " + desc : "") + " นี้ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้" + "</div>" +
+          '<button class="wt-submit" type="button" data-action="confirmDeleteProdLog" style="background:var(--danger);border-color:var(--danger);">ลบรายการ</button>' +
+          '<button class="wt-cancel-link" type="button" data-action="cancelDeleteProdLog" style="display:block;text-align:center;width:100%;margin-top:10px;">ยกเลิก</button>' +
         "</div>" +
       "</div>"
     );
@@ -731,6 +819,147 @@
     }).join("");
   }
 
+  // ---------------- PRODUCTION ISSUE LOG (shared helpers) ----------------
+  function getFilteredProdLogs() {
+    var q = state.prodLogSearch.trim().toLowerCase();
+    var from = state.prodLogDateFrom, to = state.prodLogDateTo;
+    return state.productionLogs
+      .filter(function (p) {
+        if (from && p.date < from) return false;
+        if (to && p.date > to) return false;
+        if (q) {
+          var hay = [p.item, p.solution, p.result].join(" ").toLowerCase();
+          if (hay.indexOf(q) === -1) return false;
+        }
+        return true;
+      })
+      .sort(function (a, b) { return (b.date + b.createdAt).localeCompare(a.date + a.createdAt); });
+  }
+
+  function getProdLogStatus(p) {
+    var hasResult = p.result && p.result.trim();
+    return hasResult
+      ? { label: "แก้ไขเสร็จสิ้น", color: "#4E9A5C" }
+      : { label: "รอสรุปผล", color: "#C97A12" };
+  }
+
+  function computeProdLogRunNumbers() {
+    var byDateOrder = state.productionLogs.slice().sort(function (a, b) { return a.createdAt - b.createdAt; });
+    var counters = {};
+    var map = {};
+    byDateOrder.forEach(function (p) {
+      counters[p.date] = (counters[p.date] || 0) + 1;
+      map[p.id] = p.date.replace(/-/g, "") + "-P" + String(counters[p.date]).padStart(3, "0");
+    });
+    return map;
+  }
+
+  function renderProdLogRowsHtml(list) {
+    if (list.length === 0) return '<div class="wt-empty">ไม่พบรายการที่ตรงกับตัวกรอง</div>';
+    var runNumbers = computeProdLogRunNumbers();
+    return '<table class="wt-table"><thead><tr><th>เลขที่รายการ</th><th>รูป</th><th>วันที่</th><th>รายการ</th><th>แนวทางแก้ไข</th><th>สรุปผลหลังแก้ไข</th><th>สถานะ</th><th></th></tr></thead><tbody>' +
+      list.map(function (p) {
+        var status = getProdLogStatus(p);
+        var pPhotos = p.photos || [];
+        var thumb = pPhotos.length
+          ? '<div class="wt-thumb-wrap"><img class="wt-thumb" src="' + pPhotos[0] + '" alt="" data-action="openProdLightbox" data-id="' + p.id + '">' +
+            (pPhotos.length > 1 ? '<span class="wt-thumb-badge">' + pPhotos.length + "</span>" : "") + "</div>"
+          : '<div class="wt-thumb-empty">–</div>';
+        var itemCell = '<div class="wt-wrap-cell">' + esc(p.item) + "</div>";
+        var solutionCell = (p.solution && p.solution.trim()) ? '<div class="wt-wrap-cell">' + esc(p.solution) + "</div>" : '<span class="wt-prod-code">–</span>';
+        var resultCell = (p.result && p.result.trim()) ? '<div class="wt-wrap-cell">' + esc(p.result) + "</div>" : '<span class="wt-prod-code">–</span>';
+        return "<tr>" +
+          '<td class="wt-mono wt-run-no">' + esc(runNumbers[p.id] || "-") + "</td>" +
+          "<td>" + thumb + "</td>" +
+          '<td class="wt-mono">' + esc(p.date) + "</td>" +
+          "<td>" + itemCell + "</td>" +
+          "<td>" + solutionCell + "</td>" +
+          "<td>" + resultCell + "</td>" +
+          '<td><span class="wt-tag" style="background:' + status.color + '26;color:' + status.color + '">' + status.label + "</span></td>" +
+          '<td style="display:flex;gap:6px;"><button class="wt-edit-btn" data-action="editProdLog" data-id="' + p.id + '">แก้ไข</button>' +
+          '<button class="wt-del" data-action="deleteProdLog" data-id="' + p.id + '" title="ลบ">✕</button></td>' +
+          "</tr>";
+      }).join("") +
+      "</tbody></table>";
+  }
+
+  function updateProdLogTable() {
+    var filtered = getFilteredProdLogs();
+    var wrap = document.getElementById("prodLogTableWrap");
+    if (wrap) wrap.innerHTML = renderProdLogRowsHtml(filtered);
+    var countEl = document.getElementById("prodLogCountText");
+    if (countEl) countEl.textContent = "พบ " + filtered.length + " จากทั้งหมด " + state.productionLogs.length + " รายการ";
+  }
+
+  function renderProdPhotoPreviewsHtml() {
+    return state.pendingProdPhotos.map(function (dataUrl, i) {
+      return '<div class="wt-photo-preview"><img src="' + dataUrl + '" alt="ตัวอย่างปัญหาการผลิต"><button type="button" class="wt-photo-remove" data-action="removeProdPhoto" data-index="' + i + '">✕</button></div>';
+    }).join("");
+  }
+
+  function renderProductionTab() {
+    var editingLog = state.editingProdLogId ? state.productionLogs.find(function (x) { return x.id === state.editingProdLogId; }) : null;
+    var fd = editingLog ? { date: editingLog.date } : state.prodFormDefaults;
+    var initialItem = editingLog ? editingLog.item : "";
+    var initialSolution = editingLog ? editingLog.solution : "";
+    var initialResult = editingLog ? editingLog.result : "";
+    var initialStatus = getProdLogStatus({ result: initialResult });
+
+    var filteredLogs = getFilteredProdLogs();
+    var rowsHtml = renderProdLogRowsHtml(filteredLogs);
+    var hasFilter = state.prodLogSearch || state.prodLogDateFrom || state.prodLogDateTo;
+
+    return (
+      '<div class="wt-entry-grid">' +
+        '<div class="wt-card">' +
+          "<h3>" + (editingLog ? "แก้ไขบันทึกปัญหาการผลิต" : "บันทึกปัญหาการผลิตประจำวัน") + "</h3>" +
+          '<form id="prodLogForm" data-action="submitProdLog">' +
+            '<div class="wt-field"><label>วันที่</label><input type="date" id="prodDateField" value="' + esc(fd.date) + '" max="' + todayStr() + '"></div>' +
+
+            '<div class="wt-field"><label>รายการ (ปัญหาที่พบ)</label><textarea rows="3" id="prodItemField" placeholder="อธิบายปัญหาที่พบในการผลิตวันนี้">' + esc(initialItem) + "</textarea></div>" +
+
+            '<div class="wt-field"><label>รูปภาพ (แนบได้หลายรูป)</label>' +
+              '<div class="wt-photo-zone" id="prodPhotoZone">' +
+                '<label class="wt-photo-label" for="prodPhotoInput"><span id="prodPhotoLabelText">' + (state.prodPhotoBusy ? "กำลังประมวลผลรูป…" : (state.pendingProdPhotos.length ? "📎 เพิ่มรูปภาพ" : "📎 แนบรูปภาพ")) + "</span></label>" +
+                '<input type="file" accept="image/*" multiple id="prodPhotoInput" data-action="prodPhotoChange">' +
+                '<div class="wt-photo-preview-list" id="prodPhotoPreviewWrap">' + renderProdPhotoPreviewsHtml() + "</div>" +
+              "</div>" +
+            "</div>" +
+
+            '<div class="wt-field"><label>แนวทางแก้ไข</label><textarea rows="2" id="prodSolutionField" placeholder="ระบุแนวทางแก้ไขปัญหา">' + esc(initialSolution) + "</textarea></div>" +
+
+            '<div class="wt-field"><label>สรุปผลหลังแก้ไข</label><textarea rows="2" id="prodResultField" placeholder="สรุปผลหลังจากดำเนินการแก้ไข — เว้นว่างไว้หากยังรอผล" data-live-prod-status>' + esc(initialResult) + "</textarea>" +
+              '<div class="wt-hint">สถานะ: <span class="wt-tag" id="prodStatusPreviewTag" style="background:' + initialStatus.color + '26;color:' + initialStatus.color + ';">' + initialStatus.label + "</span></div>" +
+            "</div>" +
+
+            '<div class="wt-error" id="prodFormError"></div>' +
+            '<button class="wt-submit" type="submit">' + (editingLog ? "บันทึกการแก้ไข" : "บันทึกรายการ") + "</button>" +
+            (editingLog ? '<button type="button" class="wt-cancel-link" data-action="cancelEditProdLog" style="display:block;text-align:center;width:100%;">ยกเลิกการแก้ไข</button>' : "") +
+            '<div class="wt-save-state" id="saveIndicator"></div>' +
+          "</form>" +
+        "</div>" +
+
+        '<div class="wt-card">' +
+          '<div class="wt-ledger-head"><h3 style="margin:0;border:none;padding:0;">บันทึกล่าสุด (' + state.productionLogs.length + ")</h3>" +
+            '<div style="display:flex;gap:6px;">' +
+              '<button class="wt-csv-btn" data-action="exportProdXlsx"' + (filteredLogs.length ? "" : " disabled") + '>⤓ Excel</button>' +
+              '<button class="wt-csv-btn" data-action="printProdReport"' + (filteredLogs.length ? "" : " disabled") + '>🖨 PDF รายงาน</button>' +
+            "</div>" +
+          "</div>" +
+          '<div class="wt-filter-row">' +
+            '<input type="text" id="prodLogSearchField" class="wt-search-input" placeholder="🔎 ค้นหารายการ/แนวทางแก้ไข/ผล..." value="' + esc(state.prodLogSearch) + '">' +
+            '<input type="date" id="prodLogDateFromField" value="' + esc(state.prodLogDateFrom) + '" title="จากวันที่">' +
+            '<span class="wt-filter-sep">–</span>' +
+            '<input type="date" id="prodLogDateToField" value="' + esc(state.prodLogDateTo) + '" title="ถึงวันที่">' +
+            (hasFilter ? '<button type="button" class="wt-link" data-action="clearProdLogFilter">ล้างตัวกรอง</button>' : "") +
+          "</div>" +
+          '<div class="wt-hint" id="prodLogCountText" style="margin:0 0 8px;">พบ ' + filteredLogs.length + " จากทั้งหมด " + state.productionLogs.length + " รายการ</div>" +
+          '<div class="wt-table-wrap" id="prodLogTableWrap">' + rowsHtml + "</div>" +
+        "</div>" +
+      "</div>"
+    );
+  }
+
   // ---------------- ENTRY TAB ----------------
   function findMatchingProductId(entry) {
     var byCode = state.settings.products.find(function (p) { return entry.productCode && p.code === entry.productCode; });
@@ -752,10 +981,8 @@
     var initialRootCause = editingEntry ? editingEntry.rootCause : "";
     var initialStatus = getEntryStatus({ rootCause: initialRootCause });
 
-    var productOptions = '<option value="">-- เลือกสินค้า --</option>' +
-      state.settings.products.map(function (p) {
-        return '<option value="' + esc(p.id) + '"' + (p.id === matchedProductId ? " selected" : "") + ">" + esc(p.code) + " — " + esc(p.name) + "</option>";
-      }).join("");
+    var matchedProduct = matchedProductId ? state.settings.products.find(function (p) { return p.id === matchedProductId; }) : null;
+    var productDisplayValue = matchedProduct ? productComboLabel(matchedProduct) : "";
 
     var lineOptions = '<option value="">-- เลือก --</option>' +
       state.settings.lines.map(function (l) { return '<option value="' + esc(l) + '"' + (l === fd.line ? " selected" : "") + ">" + esc(l) + "</option>"; }).join("");
@@ -780,8 +1007,12 @@
               '<div class="wt-field"><label>ประเภทของเสีย</label><select id="typeField">' + typeOptions + "</select></div>" +
             "</div>" +
 
-            '<div class="wt-field"><label>สินค้า</label>' +
-              '<select id="productField" data-action="selectProduct"' + (noProducts ? " disabled" : "") + ">" + productOptions + "</select>" +
+            '<div class="wt-field wt-combo">' +
+              '<label>สินค้า</label>' +
+              '<input type="text" id="productSearchField" autocomplete="off" placeholder="พิมพ์ชื่อสินค้า หรือรหัสสินค้า"' +
+                ' value="' + esc(productDisplayValue) + '"' + (noProducts ? " disabled" : "") + '>' +
+              '<input type="hidden" id="productField" value="' + esc(matchedProductId) + '">' +
+              '<div class="wt-combo-list" id="productComboList" style="display:none;"></div>' +
               (noProducts ? '<div class="wt-hint">ยังไม่มีสินค้าในระบบ — <button type="button" class="wt-link" data-action="setTab" data-tab="settings">ไปที่หน้าตั้งค่าเพื่อเพิ่มสินค้า</button></div>' : "") +
             "</div>" +
 
@@ -1007,7 +1238,7 @@
             '<div class="wt-note">แก้ไขราคา/หน่วยแล้วระบบจะอัปเดตให้อัตโนมัติทั้งในรายการที่บันทึกไปแล้วและรายการใหม่</div>' +
           "</form>" +
           '<div class="wt-filter-row" style="margin-top:14px;">' +
-            '<input class="wt-search-input" id="productSearchField" placeholder="ค้นหาสินค้า (ชื่อ/รหัส)" value="' + esc(state.productSearch) + '">' +
+            '<input class="wt-search-input" id="productListSearchField" placeholder="ค้นหาสินค้า (ชื่อ/รหัส)" value="' + esc(state.productSearch) + '">' +
             '<span id="productSearchClearWrap">' + (state.productSearch ? '<button type="button" class="wt-csv-btn" data-action="clearProductSearch">ล้าง</button>' : "") + "</span>" +
           "</div>" +
           '<div class="wt-table-wrap" id="productTableWrap">' + productRows + "</div>" +
@@ -1067,13 +1298,91 @@
   function showProductFormError(msg) { var el = document.getElementById("productFormError"); if (el) el.textContent = msg; }
   function showProductFormNote(msg) { var el = document.getElementById("productFormNote"); if (el) el.textContent = msg; }
 
-  function handleSelectProduct(select) {
-    var product = state.settings.products.find(function (p) { return p.id === select.value; });
+  // ---------------- product combobox (entry form "สินค้า" field) ----------------
+  // Lets the user type either a product name or a product code to find/select
+  // a product, instead of scrolling a plain <select>. #productField stays a
+  // hidden input holding the chosen product id, so handleSubmitEntry doesn't
+  // need to change.
+  function productComboLabel(p) { return p.name + (p.code ? " (" + p.code + ")" : ""); }
+
+  function matchProducts(query) {
+    var q = (query || "").trim().toLowerCase();
+    var list = state.settings.products;
+    if (!q) return list.slice(0, 30);
+    return list.filter(function (p) {
+      return (p.name && p.name.toLowerCase().indexOf(q) !== -1) || (p.code && p.code.toLowerCase().indexOf(q) !== -1);
+    }).slice(0, 30);
+  }
+
+  function renderProductComboListHtml(matches) {
+    if (matches.length === 0) return '<div class="wt-combo-empty">ไม่พบสินค้าที่ตรงกัน</div>';
+    return matches.map(function (p) {
+      return '<div class="wt-combo-item" data-action="pickProduct" data-id="' + esc(p.id) + '">' +
+        '<span class="name">' + esc(p.name) + '</span>' +
+        (p.code ? '<span class="code">' + esc(p.code) + '</span>' : '') +
+        '</div>';
+    }).join("");
+  }
+
+  function openProductCombo(query) {
+    var listEl = document.getElementById("productComboList");
+    if (!listEl) return;
+    listEl.innerHTML = renderProductComboListHtml(matchProducts(query));
+    listEl.style.display = "block";
+  }
+
+  function closeProductCombo() {
+    var listEl = document.getElementById("productComboList");
+    if (listEl) listEl.style.display = "none";
+  }
+
+  function applyProductToFields(product) {
     var unitField = document.getElementById("unitField");
     var priceField = document.getElementById("unitPriceField");
+    if (!unitField || !priceField) return;
     if (product) { unitField.value = product.unit; priceField.value = product.price; }
     else { unitField.value = ""; priceField.value = ""; }
     updateTotalDisplay();
+  }
+
+  function selectProductById(id) {
+    var product = state.settings.products.find(function (p) { return p.id === id; });
+    var hidden = document.getElementById("productField");
+    var searchField = document.getElementById("productSearchField");
+    if (!product || !hidden || !searchField) return;
+    hidden.value = product.id;
+    searchField.value = productComboLabel(product);
+    applyProductToFields(product);
+    closeProductCombo();
+  }
+
+  function handleProductSearchInput(inputEl) {
+    // Any manual edit invalidates the previous selection until the user picks
+    // a product again (by click, or by typing an exact name/code match).
+    var hidden = document.getElementById("productField");
+    if (hidden) hidden.value = "";
+    applyProductToFields(null);
+    openProductCombo(inputEl.value);
+  }
+
+  function handleProductSearchFocus(inputEl) {
+    openProductCombo(inputEl.value);
+  }
+
+  function handleProductSearchBlur(inputEl) {
+    // Delay so a click on a suggestion (which fires after blur) still lands
+    // before we hide the list / attempt an auto-match.
+    setTimeout(function () {
+      closeProductCombo();
+      var hidden = document.getElementById("productField");
+      if (!hidden || hidden.value) return;
+      var q = (inputEl.value || "").trim().toLowerCase();
+      if (!q) return;
+      var exact = state.settings.products.filter(function (p) {
+        return (p.name && p.name.toLowerCase() === q) || (p.code && p.code.toLowerCase() === q);
+      });
+      if (exact.length === 1) selectProductById(exact[0].id);
+    }, 150);
   }
 
   function handleSubmitEntry(e) {
@@ -1170,6 +1479,182 @@
     if (wrap) wrap.innerHTML = renderPhotoPreviewsHtml();
     var lbl = document.getElementById("photoLabelText");
     if (lbl) lbl.textContent = state.pendingPhotos.length ? "📎 เพิ่มรูปภาพ" : "📎 แนบรูปภาพ";
+  }
+
+  // ---------------- PRODUCTION ISSUE LOG (form handlers) ----------------
+  function handleProdPhotoChange(input) {
+    var files = input.files ? Array.prototype.slice.call(input.files) : [];
+    if (!files.length) return;
+    state.prodPhotoBusy = true;
+    var label = document.getElementById("prodPhotoLabelText");
+    if (label) label.textContent = "กำลังประมวลผลรูป…";
+
+    var promises = files.map(function (file) { return fileToCompressedDataUrl(file); });
+    Promise.all(promises).then(function (dataUrls) {
+      state.pendingProdPhotos = state.pendingProdPhotos.concat(dataUrls);
+      state.prodPhotoBusy = false;
+      var wrap = document.getElementById("prodPhotoPreviewWrap");
+      if (wrap) wrap.innerHTML = renderProdPhotoPreviewsHtml();
+      var lbl = document.getElementById("prodPhotoLabelText");
+      if (lbl) lbl.textContent = "📎 เพิ่มรูปภาพ";
+      if (input) input.value = "";
+    }).catch(function () {
+      state.prodPhotoBusy = false;
+      showProdFormError("แนบรูปภาพไม่สำเร็จ ลองอีกครั้ง");
+      var lbl = document.getElementById("prodPhotoLabelText");
+      if (lbl) lbl.textContent = state.pendingProdPhotos.length ? "📎 เพิ่มรูปภาพ" : "📎 แนบรูปภาพ";
+    });
+  }
+
+  function handleRemoveProdPhoto(index) {
+    state.pendingProdPhotos.splice(index, 1);
+    var wrap = document.getElementById("prodPhotoPreviewWrap");
+    if (wrap) wrap.innerHTML = renderProdPhotoPreviewsHtml();
+    var lbl = document.getElementById("prodPhotoLabelText");
+    if (lbl) lbl.textContent = state.pendingProdPhotos.length ? "📎 เพิ่มรูปภาพ" : "📎 แนบรูปภาพ";
+  }
+
+  function showProdFormError(msg) { var el = document.getElementById("prodFormError"); if (el) el.textContent = msg; }
+
+  function updateProdStatusPreview() {
+    var field = document.getElementById("prodResultField");
+    var tag = document.getElementById("prodStatusPreviewTag");
+    if (!field || !tag) return;
+    var status = getProdLogStatus({ result: field.value });
+    tag.textContent = status.label;
+    tag.style.background = status.color + "26";
+    tag.style.color = status.color;
+  }
+
+  function handleSubmitProdLog(e) {
+    e.preventDefault();
+    var date = document.getElementById("prodDateField").value;
+    var item = document.getElementById("prodItemField").value.trim();
+    var solution = document.getElementById("prodSolutionField").value.trim();
+    var result = document.getElementById("prodResultField").value.trim();
+
+    showProdFormError("");
+    if (!date) return showProdFormError("กรุณาระบุวันที่");
+    if (!item) return showProdFormError("กรุณาระบุรายการปัญหาที่พบ");
+
+    var isEditing = !!state.editingProdLogId;
+    var logId = isEditing ? state.editingProdLogId : uid();
+    var createdAt = isEditing ? state.productionLogs.find(function (x) { return x.id === state.editingProdLogId; }).createdAt : Date.now();
+    var photos = state.pendingProdPhotos.slice();
+
+    var log = {
+      id: logId,
+      date: date, item: item, solution: solution, result: result,
+      photos: photos,
+      createdAt: createdAt
+    };
+
+    var approxBytes = JSON.stringify(log).length;
+    if (approxBytes > 900000) {
+      return showProdFormError("แนบรูปรวมกันใหญ่เกินไป กรุณาลดจำนวนรูป หรือแนบทีละ 2-3 รูป");
+    }
+
+    var submitBtn = document.querySelector("#prodLogForm .wt-submit");
+    if (submitBtn) submitBtn.disabled = true;
+    showProdFormError("กำลังบันทึก…");
+
+    persistProdLog(log).catch(function (err) {
+      console.error(err);
+      showProdFormError("บันทึกไม่สำเร็จ: " + (err && err.message ? err.message : "ลองใหม่อีกครั้ง"));
+      if (submitBtn) submitBtn.disabled = false;
+    });
+
+    state.prodFormDefaults = { date: date };
+    state.pendingProdPhotos = [];
+    state.editingProdLogId = null;
+    showProdFormError("");
+    if (submitBtn) submitBtn.disabled = false;
+    render();
+  }
+
+  function exportProdLogsXlsx() {
+    if (typeof XLSX === "undefined") {
+      alert("ไม่สามารถโหลดไลบรารีสร้างไฟล์ Excel ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตแล้วลองใหม่");
+      return;
+    }
+    var rows = getFilteredProdLogs();
+    var runNumbers = computeProdLogRunNumbers();
+    var headerRow = ["เลขที่รายการ", "วันที่", "รายการ (ปัญหาที่พบ)", "แนวทางแก้ไข", "สรุปผลหลังแก้ไข", "สถานะ", "จำนวนรูปภาพแนบ"];
+    var data = rows.map(function (p) {
+      var status = getProdLogStatus(p);
+      return {
+        "เลขที่รายการ": runNumbers[p.id] || "",
+        "วันที่": p.date,
+        "รายการ (ปัญหาที่พบ)": p.item || "",
+        "แนวทางแก้ไข": p.solution || "",
+        "สรุปผลหลังแก้ไข": p.result || "",
+        "สถานะ": status.label,
+        "จำนวนรูปภาพแนบ": (p.photos || []).length
+      };
+    });
+    var ws = data.length ? XLSX.utils.json_to_sheet(data) : XLSX.utils.aoa_to_sheet([headerRow]);
+    ws["!cols"] = [{ wch: 16 }, { wch: 12 }, { wch: 42 }, { wch: 36 }, { wch: 36 }, { wch: 16 }, { wch: 14 }];
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "บันทึกปัญหาการผลิต");
+    XLSX.writeFile(wb, "production-log-" + todayStr() + ".xlsx");
+  }
+
+  function buildAndOpenProdLogPrint() {
+    var c = state.settings.company || {};
+    var rows = getFilteredProdLogs().slice().sort(function (a, b) { return (a.date + a.createdAt).localeCompare(b.date + b.createdAt); });
+    var runNumbers = computeProdLogRunNumbers();
+    var rangeLabel = (state.prodLogDateFrom || state.prodLogDateTo)
+      ? (esc(state.prodLogDateFrom || "…") + " ถึง " + esc(state.prodLogDateTo || "…"))
+      : "ทั้งหมด";
+
+    var bodyRows = rows.map(function (p, i) {
+      var status = getProdLogStatus(p).label;
+      var photoCell = (p.photos && p.photos.length)
+        ? '<img class="pr-photo" src="' + p.photos[0] + '" alt="รูปปัญหาการผลิต">'
+        : '<span class="pr-sub">–</span>';
+      return (
+        "<tr>" +
+        '<td class="pr-c">' + (i + 1) + "</td>" +
+        '<td class="pr-c pr-mono">' + esc(runNumbers[p.id] || "-") + "</td>" +
+        '<td class="pr-c">' + esc(p.date) + "</td>" +
+        '<td class="pr-c">' + photoCell + "</td>" +
+        "<td>" + esc(p.item || "") + "</td>" +
+        "<td>" + ((p.solution && p.solution.trim()) ? esc(p.solution) : '<span class="pr-sub">–</span>') + "</td>" +
+        "<td>" + ((p.result && p.result.trim()) ? esc(p.result) : '<span class="pr-sub">–</span>') + "</td>" +
+        '<td class="pr-c">' + esc(status) + "</td>" +
+        "</tr>"
+      );
+    }).join("");
+
+    var padCount = Math.max(0, 3 - rows.length);
+    for (var i = 0; i < padCount; i++) {
+      bodyRows += '<tr><td class="pr-c">&nbsp;</td><td class="pr-c">&nbsp;</td><td class="pr-c">&nbsp;</td><td class="pr-c">&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td class="pr-c">&nbsp;</td></tr>';
+    }
+
+    var html =
+      '<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><title>รายงานปัญหาการผลิต</title>' +
+      "<style>" + printBaseStyles() + "</style></head><body>" +
+
+      printHeaderHtml(c) +
+      '<div class="pr-meta">ช่วงวันที่ : ' + rangeLabel + " · จำนวน " + rows.length + " รายการ</div>" +
+      '<div class="pr-title">รายงานบันทึกปัญหาการผลิตประจำวัน</div>' +
+
+      '<table class="pr-table"><thead><tr>' +
+        '<th style="width:4%;">ลำดับ</th><th style="width:9%;">เลขที่</th><th style="width:8%;">วันที่</th><th style="width:8%;">รูป</th>' +
+        '<th style="width:22%;">รายการ (ปัญหาที่พบ)</th><th style="width:20%;">แนวทางแก้ไข</th><th style="width:20%;">สรุปผลหลังแก้ไข</th><th style="width:9%;">สถานะ</th>' +
+      "</tr></thead><tbody>" + bodyRows + "</tbody></table>" +
+
+      '<div class="pr-sign-grid">' +
+        '<div class="pr-sign"><div class="line"></div>ผู้บันทึก / ฝ่ายผลิต</div>' +
+        '<div class="pr-sign"><div class="line"></div>ผู้บริหาร / รับทราบ</div>' +
+      "</div>" +
+
+      '<div class="pr-noprint"><button onclick="window.print()">🖨 พิมพ์ / บันทึกเป็น PDF</button></div>' +
+      "</body></html>";
+
+    var win = window.open("", "_blank");
+    if (!win) { alert("เบราว์เซอร์บล็อกหน้าต่างป็อปอัป กรุณาอนุญาตป็อปอัปสำหรับหน้านี้แล้วลองอีกครั้ง"); return; }
+    win.document.open(); win.document.write(html); win.document.close();
   }
 
   function handleSubmitProduct(e) {
@@ -1270,6 +1755,7 @@
         if (ROLE_ALLOWED_TABS[state.role].indexOf(wantTab) === -1) break;
         state.tab = wantTab; render(); break;
       case "logout": handleLogout(); break;
+      case "pickProduct": selectProductById(el.getAttribute("data-id")); break;
       case "setRange":
         state.range = el.getAttribute("data-range");
         var b = getRangeBounds(state.range);
@@ -1320,6 +1806,51 @@
       case "clearLedgerFilter":
         state.ledgerSearch = ""; state.ledgerDateFrom = ""; state.ledgerDateTo = "";
         render(); break;
+      case "editProdLog":
+        var editProdTarget = state.productionLogs.find(function (x) { return x.id === el.getAttribute("data-id"); });
+        if (editProdTarget) {
+          state.editingProdLogId = editProdTarget.id;
+          state.pendingProdPhotos = editProdTarget.photos ? editProdTarget.photos.slice() : [];
+          showProdFormError("");
+          render();
+          var prodCard = document.querySelector(".wt-entry-grid .wt-card");
+          if (prodCard && prodCard.scrollIntoView) prodCard.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        break;
+      case "cancelEditProdLog":
+        state.editingProdLogId = null;
+        state.pendingProdPhotos = [];
+        render(); break;
+      case "deleteProdLog":
+        state.confirmDeleteProdLogId = el.getAttribute("data-id");
+        render(); break;
+      case "confirmDeleteProdLog":
+        var delPlogId = state.confirmDeleteProdLogId;
+        state.confirmDeleteProdLogId = null;
+        if (state.editingProdLogId === delPlogId) { state.editingProdLogId = null; state.pendingProdPhotos = []; }
+        state.productionLogs = state.productionLogs.filter(function (x) { return x.id !== delPlogId; });
+        render();
+        deleteProdLogRemote(delPlogId);
+        break;
+      case "cancelDeleteProdLog":
+        if (e.target === el) { state.confirmDeleteProdLogId = null; render(); }
+        break;
+      case "removeProdPhoto": handleRemoveProdPhoto(parseInt(el.getAttribute("data-index"), 10)); break;
+      case "openProdLightbox": state.prodLightboxLogId = el.getAttribute("data-id"); state.prodLightboxIndex = 0; render(); break;
+      case "closeProdLightbox": if (e.target === el) { state.prodLightboxLogId = null; render(); } break;
+      case "prodLightboxPrev": case "prodLightboxNext":
+        var plbLog = state.productionLogs.find(function (x) { return x.id === state.prodLightboxLogId; });
+        if (plbLog && plbLog.photos && plbLog.photos.length) {
+          var plen = plbLog.photos.length;
+          state.prodLightboxIndex = action === "prodLightboxPrev" ? (state.prodLightboxIndex - 1 + plen) % plen : (state.prodLightboxIndex + 1) % plen;
+          render();
+        }
+        break;
+      case "clearProdLogFilter":
+        state.prodLogSearch = ""; state.prodLogDateFrom = ""; state.prodLogDateTo = "";
+        render(); break;
+      case "exportProdXlsx": exportProdLogsXlsx(); break;
+      case "printProdReport": buildAndOpenProdLogPrint(); break;
       case "editProduct": state.editingProductId = el.getAttribute("data-id"); render(); break;
       case "cancelEditProduct": state.editingProductId = null; render(); break;
       case "deleteProduct":
@@ -1374,15 +1905,18 @@
     var form = e.target;
     if (form.id === "loginForm") handleSubmitLogin(e);
     else if (form.id === "entryForm") handleSubmitEntry(e);
+    else if (form.id === "prodLogForm") handleSubmitProdLog(e);
     else if (form.id === "productForm") handleSubmitProduct(e);
     else if (form.id === "companyForm") handleSubmitCompany(e);
   });
 
   document.getElementById("app").addEventListener("change", function (e) {
-    if (e.target.id === "productField") handleSelectProduct(e.target);
-    else if (e.target.id === "photoInput") handlePhotoChange(e.target);
+    if (e.target.id === "photoInput") handlePhotoChange(e.target);
+    else if (e.target.id === "prodPhotoInput") handleProdPhotoChange(e.target);
     else if (e.target.id === "ledgerDateFromField") { state.ledgerDateFrom = e.target.value; render(); }
     else if (e.target.id === "ledgerDateToField") { state.ledgerDateTo = e.target.value; render(); }
+    else if (e.target.id === "prodLogDateFromField") { state.prodLogDateFrom = e.target.value; render(); }
+    else if (e.target.id === "prodLogDateToField") { state.prodLogDateTo = e.target.value; render(); }
     else if (e.target.id === "dashStartField") { state.rangeStart = e.target.value; state.range = "custom"; render(); }
     else if (e.target.id === "dashEndField") { state.rangeEnd = e.target.value; state.range = "custom"; render(); }
   });
@@ -1390,9 +1924,20 @@
   document.getElementById("app").addEventListener("input", function (e) {
     if (e.target.hasAttribute("data-live-total")) updateTotalDisplay();
     if (e.target.hasAttribute("data-live-status")) updateStatusPreview();
+    if (e.target.hasAttribute("data-live-prod-status")) updateProdStatusPreview();
     if (e.target.id === "ledgerSearchField") { state.ledgerSearch = e.target.value; updateLedgerTable(); }
-    if (e.target.id === "productSearchField") { state.productSearch = e.target.value; updateProductsTable(); }
+    if (e.target.id === "prodLogSearchField") { state.prodLogSearch = e.target.value; updateProdLogTable(); }
+    if (e.target.id === "productListSearchField") { state.productSearch = e.target.value; updateProductsTable(); }
+    if (e.target.id === "productSearchField") handleProductSearchInput(e.target);
   });
+
+  document.getElementById("app").addEventListener("focus", function (e) {
+    if (e.target.id === "productSearchField") handleProductSearchFocus(e.target);
+  }, true);
+
+  document.getElementById("app").addEventListener("blur", function (e) {
+    if (e.target.id === "productSearchField") handleProductSearchBlur(e.target);
+  }, true);
 
   document.getElementById("app").addEventListener("keydown", function (e) {
     var actionKey = e.target.getAttribute && e.target.getAttribute("data-enter-action");
@@ -1403,6 +1948,12 @@
       if (actionKey === "addUnit") addListItem("units", "unitInputField");
       if (actionKey === "addType") addWasteType();
     }
+    if (e.target.id === "productSearchField" && e.key === "Enter") {
+      var list = document.getElementById("productComboList");
+      var first = list && list.querySelector(".wt-combo-item");
+      if (first) { e.preventDefault(); selectProductById(first.getAttribute("data-id")); }
+    }
+    if (e.target.id === "productSearchField" && e.key === "Escape") closeProductCombo();
   });
 
   function handleGeneratePrint() {
