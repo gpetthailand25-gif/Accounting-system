@@ -5,6 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ประกันภัยและกรมธรรม์</title>
 <link rel="stylesheet" href="style.css">
+<style>
+/* สไตล์สำรองสำหรับส่วนแนบไฟล์ ใช้เผื่อ style.css ยังไม่มีคลาสเหล่านี้ */
+.file-drop{border:1px dashed #c9cdd4;border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;}
+.file-drop-hint{font-size:12px;color:#8a8f98;}
+.file-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+.file-chip{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#f5f6f8;border-radius:6px;font-size:13px;}
+.file-chip a{color:#2563eb;text-decoration:none;word-break:break-all;}
+.file-chip a:hover{text-decoration:underline;}
+.file-chip-pending{background:#fff7e6;}
+.file-size{margin-left:auto;font-size:11px;color:#8a8f98;white-space:nowrap;}
+.file-remove{border:none;background:transparent;color:#8a8f98;font-size:16px;line-height:1;cursor:pointer;padding:0 2px;}
+.file-remove:hover{color:#e11d48;}
+.file-empty{font-size:13px;color:#8a8f98;margin:4px 0 0;}
+.file-size-note{font-size:11px;color:#8a8f98;margin:6px 0 0;}
+.file-legacy{font-size:12px;color:#8a8f98;margin:6px 0 0;}
+.pi-files{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;}
+.pi-file-link{font-size:12px;color:#2563eb;text-decoration:none;}
+.pi-file-link:hover{text-decoration:underline;}
+</style>
 </head>
 <body>
 <div id="app"></div>
@@ -16,7 +35,8 @@
 
 <script>
 const STORAGE_KEY_ASSETS = 'assets';
-const STORAGE_KEY_POLICIES = 'policies';
+const STORAGE_KEY_POLICIES_LEGACY = 'policies'; // คีย์เดิม (array เดียวรวมทุกกรมธรรม์) ใช้สำหรับ migrate ครั้งแรกเท่านั้น
+const POLICY_KEY_PREFIX = 'policy:';
 
 const KINDS = {
   factory: { label: 'ประกันโรงงาน', addLabel: 'เพิ่มโรงงาน', mark: 'ปก', markClass: 'amber' },
@@ -26,6 +46,38 @@ const KINDS = {
 let assets = [];
 let policies = [];
 let view = { name: 'dashboard', params: { kind: (new URLSearchParams(location.search).get('kind') === 'vehicle') ? 'vehicle' : 'factory' } };
+
+// สถานะไฟล์แนบของฟอร์มกรมธรรม์ที่กำลังเปิดอยู่ (รีเซ็ตทุกครั้งที่เข้าฟอร์ม)
+// kept = ไฟล์เดิมที่เก็บเป็น base64 ไว้แล้ว (มี dataUrl), newFiles = ไฟล์ที่เพิ่งเลือกแต่ยังไม่แปลง (เป็น File object)
+let policyFileState = { kept: [], newFiles: [] };
+
+const MAX_POLICY_DOC_BYTES = 900000; // เผื่อพื้นที่ไว้จากลิมิต ~1,048,487 ไบต์ต่อเอกสารของ Firestore
+
+function readFileAsDataURL(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+async function encodeFilesToBase64(files){
+  const encoded = [];
+  for(const file of files){
+    const dataUrl = await readFileAsDataURL(file);
+    encoded.push({ name: file.name, type: file.type, size: file.size, dataUrl });
+  }
+  return encoded;
+}
+function estimateBytes(obj){
+  return new Blob([JSON.stringify(obj)]).size;
+}
+function fmtFileSize(bytes){
+  if(!bytes && bytes !== 0) return '';
+  if(bytes < 1024) return bytes + ' B';
+  if(bytes < 1024*1024) return (bytes/1024).toFixed(0) + ' KB';
+  return (bytes/1024/1024).toFixed(1) + ' MB';
+}
 
 const uid = () => Math.random().toString(36).slice(2,10);
 const todayStr = () => new Date().toISOString().slice(0,10);
@@ -68,19 +120,55 @@ async function loadData(){
     const a = await window.storage.get(STORAGE_KEY_ASSETS);
     assets = a ? JSON.parse(a.value) : [];
   }catch(e){ assets = []; }
-  try{
-    const p = await window.storage.get(STORAGE_KEY_POLICIES);
-    policies = p ? JSON.parse(p.value) : [];
-  }catch(e){ policies = []; }
+  policies = await loadPolicies();
   render();
 }
 async function saveAssets(){
   try{ await window.storage.set(STORAGE_KEY_ASSETS, JSON.stringify(assets), false); }
   catch(e){ console.error('save assets failed', e); }
 }
-async function savePolicies(){
-  try{ await window.storage.set(STORAGE_KEY_POLICIES, JSON.stringify(policies), false); }
-  catch(e){ console.error('save policies failed', e); }
+
+function policyDocKey(id){ return POLICY_KEY_PREFIX + id; }
+
+async function loadPolicies(){
+  // 1) โครงสร้างใหม่: กรมธรรม์แต่ละรายการเก็บเป็นคนละเอกสาร (คีย์ policy:<id>)
+  let keys = [];
+  try{
+    const listResult = await window.storage.list(POLICY_KEY_PREFIX);
+    keys = (listResult && listResult.keys) || [];
+  }catch(e){ keys = []; }
+
+  if(keys.length > 0){
+    const items = await Promise.all(keys.map(async k => {
+      try{
+        const r = await window.storage.get(k);
+        return JSON.parse(r.value);
+      }catch(e){ return null; }
+    }));
+    return items.filter(Boolean);
+  }
+
+  // 2) ไม่มีข้อมูลแบบใหม่ -> ลอง migrate จากของเดิม (คีย์ 'policies' เก็บเป็น array เดียวทั้งหมด)
+  try{
+    const legacy = await window.storage.get(STORAGE_KEY_POLICIES_LEGACY);
+    const legacyPolicies = legacy ? JSON.parse(legacy.value) : [];
+    if(legacyPolicies.length){
+      for(const p of legacyPolicies){
+        await window.storage.set(policyDocKey(p.id), JSON.stringify(p), false);
+      }
+      try{ await window.storage.delete(STORAGE_KEY_POLICIES_LEGACY); }catch(e){ /* ไม่เป็นไรถ้าลบไม่ได้ */ }
+    }
+    return legacyPolicies;
+  }catch(e){
+    return [];
+  }
+}
+async function savePolicy(p){
+  await window.storage.set(policyDocKey(p.id), JSON.stringify(p), false);
+}
+async function deletePolicyDoc(id){
+  try{ await window.storage.delete(policyDocKey(id)); }
+  catch(e){ console.error('ลบกรมธรรม์ไม่สำเร็จ', id, e); }
 }
 
 function currentKind(){ return (view.params && view.params.kind) || 'factory'; }
@@ -296,6 +384,10 @@ function assetDetailHtml(assetId){
       <div class="pi-main">
         <p style="font-weight:500;">${escapeHtml(p.insurer)} · เลขกรมธรรม์ ${escapeHtml(p.policyNumber||'-')} ${p.insClass ? '· ประเภท '+escapeHtml(p.insClass) : ''}</p>
         <p class="sub">คุ้มครอง ${fmtDate(p.startDate)} — ${fmtDate(p.endDate)} · เบี้ยประกัน ${fmtMoney(p.premium)} ${p.coverAmount ? '· ทุนประกัน '+fmtMoney(p.coverAmount) : ''}</p>
+        ${(p.docFiles && p.docFiles.length) ? `
+        <div class="pi-files">
+          ${p.docFiles.map(f => `<a href="${escapeAttr(f.dataUrl)}" download="${escapeAttr(f.name)}" class="pi-file-link">📎 ${escapeHtml(f.name)}</a>`).join('')}
+        </div>` : (p.docRef ? `<p class="sub">เอกสารอ้างอิง: ${escapeHtml(p.docRef)}</p>` : '')}
       </div>
       <div style="display:flex;align-items:center;gap:10px;">
         ${statusPill(st)}
@@ -332,6 +424,7 @@ function policyFormHtml(assetId, policyId){
   if(!a) return `<p>ไม่พบรายการ</p>`;
   const kind = a.type;
   const editing = policies.find(p => p.id === policyId);
+  policyFileState = { kept: (editing?.docFiles || []).slice(), newFiles: [] };
 
   return `
   <div class="back-row"><button class="btn-ghost" data-nav="assetDetail" data-asset="${assetId}" data-kind="${kind}">← กลับหน้ารายการ</button></div>
@@ -378,8 +471,13 @@ function policyFormHtml(assetId, policyId){
           <input type="date" name="endDate" required value="${escapeAttr(editing?.endDate||'')}">
         </div>
         <div class="field full">
-          <label>เอกสารอ้างอิง (ชื่อไฟล์กรมธรรม์)</label>
-          <input type="text" name="docRef" placeholder="เช่น กรมธรรม์_2569.pdf" value="${escapeAttr(editing?.docRef||'')}">
+          <label>เอกสารอ้างอิง (แนบไฟล์ได้หลายไฟล์)</label>
+          <div class="file-drop">
+            <input type="file" id="docFilesInput" multiple>
+            <span class="file-drop-hint">เลือกไฟล์กรมธรรม์ / เอกสารแนบ (เลือกได้ครั้งละหลายไฟล์)</span>
+          </div>
+          <div class="file-list" id="fileList">${fileListHtml()}</div>
+          ${editing?.docRef ? `<p class="file-legacy">อ้างอิงเดิม: ${escapeHtml(editing.docRef)}</p>` : ''}
         </div>
       </div>
 
@@ -390,6 +488,43 @@ function policyFormHtml(assetId, policyId){
       </div>
     </form>
   </div>`;
+}
+
+// ---------- ไฟล์แนบ (กรมธรรม์) ----------
+function fileListHtml(){
+  const keptChips = policyFileState.kept.map((f,i) => `
+    <div class="file-chip">
+      <a href="${escapeAttr(f.dataUrl)}" download="${escapeAttr(f.name)}">${escapeHtml(f.name)}</a>
+      <span class="file-size">${fmtFileSize(f.size)}</span>
+      <button type="button" class="file-remove" data-remove-kind="kept" data-remove-idx="${i}" title="ลบไฟล์นี้">×</button>
+    </div>`).join('');
+  const newChips = policyFileState.newFiles.map((f,i) => `
+    <div class="file-chip file-chip-pending">
+      <span>${escapeHtml(f.name)}</span>
+      <span class="file-size">${fmtFileSize(f.size)} · ยังไม่บันทึก</span>
+      <button type="button" class="file-remove" data-remove-kind="new" data-remove-idx="${i}" title="เอาออก">×</button>
+    </div>`).join('');
+  const chips = keptChips + newChips;
+  const totalBytes = policyFileState.kept.reduce((s,f)=>s+(f.size||0),0) + policyFileState.newFiles.reduce((s,f)=>s+(f.size||0),0);
+  const sizeNote = `<p class="file-size-note">รวมขนาดไฟล์ประมาณ ${fmtFileSize(totalBytes)} (แนะนำไม่เกิน ~700 KB ต่อกรมธรรม์)</p>`;
+  return (chips || '<p class="file-empty">ยังไม่มีไฟล์แนบ</p>') + sizeNote;
+}
+function renderFileList(){
+  const el = document.getElementById('fileList');
+  if(!el) return;
+  el.innerHTML = fileListHtml();
+  attachFileListHandlers();
+}
+function attachFileListHandlers(){
+  document.querySelectorAll('[data-remove-kind]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const kind = btn.getAttribute('data-remove-kind');
+      const idx = Number(btn.getAttribute('data-remove-idx'));
+      if(kind === 'kept') policyFileState.kept.splice(idx, 1);
+      else policyFileState.newFiles.splice(idx, 1);
+      renderFileList();
+    });
+  });
 }
 
 // ---------- HELPERS ----------
@@ -455,10 +590,11 @@ function attachHandlers(){
     btnDeleteAsset.addEventListener('click', async () => {
       const editingId = view.params && view.params.assetId;
       const kind = currentKind();
+      const toDelete = policies.filter(p => p.assetId === editingId);
       assets = assets.filter(a => a.id !== editingId);
       policies = policies.filter(p => p.assetId !== editingId);
       await saveAssets();
-      await savePolicies();
+      for(const p of toDelete) await deletePolicyDoc(p.id);
       go('dashboard', { kind });
     });
   }
@@ -474,6 +610,16 @@ function attachHandlers(){
     btn.addEventListener('click', () => go('policyForm', { assetId, policyId: btn.getAttribute('data-edit-policy'), kind: currentKind() }));
   });
 
+  const docFilesInput = document.getElementById('docFilesInput');
+  if(docFilesInput){
+    docFilesInput.addEventListener('change', () => {
+      policyFileState.newFiles.push(...Array.from(docFilesInput.files));
+      docFilesInput.value = '';
+      renderFileList();
+    });
+    attachFileListHandlers();
+  }
+
   const policyForm = document.getElementById('policyForm');
   if(policyForm){
     policyForm.addEventListener('submit', async (e) => {
@@ -483,14 +629,46 @@ function attachHandlers(){
       const assetId = view.params.assetId;
       const kind = view.params.kind || currentKind();
       const editingId = view.params.policyId;
-      if(editingId){
-        const idx = policies.findIndex(p => p.id === editingId);
-        policies[idx] = { ...policies[idx], ...data };
-      } else {
-        policies.push({ id: uid(), assetId, ...data });
+
+      const submitBtn = policyForm.querySelector('button[type="submit"]');
+      const originalLabel = submitBtn.textContent;
+      submitBtn.disabled = true;
+
+      try{
+        let encodedNew = [];
+        if(policyFileState.newFiles.length){
+          submitBtn.textContent = 'กำลังแปลงไฟล์...';
+          encodedNew = await encodeFilesToBase64(policyFileState.newFiles);
+        }
+        data.docFiles = [...policyFileState.kept, ...encodedNew];
+
+        const record = editingId
+          ? { ...(policies.find(p => p.id === editingId)), ...data, id: editingId, assetId }
+          : { id: uid(), assetId, ...data };
+
+        if(estimateBytes(record) > MAX_POLICY_DOC_BYTES){
+          alert('ไฟล์แนบรวมกันใหญ่เกินไป (เกิน ~700 KB) กรุณาลดจำนวนไฟล์ หรือใช้ไฟล์ที่บีบอัด/ขนาดเล็กลง แล้วลองใหม่');
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalLabel;
+          return;
+        }
+
+        submitBtn.textContent = 'กำลังบันทึก...';
+        await savePolicy(record);
+
+        if(editingId){
+          const idx = policies.findIndex(p => p.id === editingId);
+          policies[idx] = record;
+        } else {
+          policies.push(record);
+        }
+        go('assetDetail', { assetId, kind });
+      }catch(err){
+        console.error('บันทึกกรมธรรม์ไม่สำเร็จ', err);
+        alert('บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalLabel;
       }
-      await savePolicies();
-      go('assetDetail', { assetId, kind });
     });
   }
   const btnDeletePolicy = document.getElementById('btnDeletePolicy');
@@ -499,8 +677,8 @@ function attachHandlers(){
       const assetId = view.params.assetId;
       const kind = view.params.kind || currentKind();
       const editingId = view.params.policyId;
+      await deletePolicyDoc(editingId);
       policies = policies.filter(p => p.id !== editingId);
-      await savePolicies();
       go('assetDetail', { assetId, kind });
     });
   }
