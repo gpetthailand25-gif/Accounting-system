@@ -138,6 +138,7 @@
   .wt-gauge-val { width: 90px; text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 12px; flex-shrink: 0; }
 
   .wt-source-table { width: 100%; font-size: 13px; border-collapse: collapse; }
+  .wt-source-table th { text-align: left; font-size: 11px; color: var(--text-muted); font-weight: 600; padding: 4px 4px 8px; border-bottom: 1px solid var(--border); }
   .wt-source-table td { padding: 7px 4px; border-bottom: 1px solid var(--border); }
   .wt-source-table .name-cell { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .wt-source-bar-track { background: var(--bg); border-radius: 3px; height: 8px; overflow: hidden; border: 1px solid var(--border); }
@@ -261,6 +262,7 @@
 
   // ---------- constants ----------
   var TYPE_COLOR_PALETTE = ["#B8860B", "#C0574A", "#96742E", "#4A7B94", "#5C8A4E", "#8A7A5C", "#7A6BAE", "#3E9484", "#B06A4A", "#5F8E6E"];
+  var THAI_MONTHS_SHORT = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
   var ROLE_STORAGE_KEY = "bakery_waste_role_v1";
   var ACCESS_CODES = {
     "acc-741": { role: "accounting", label: "ฝ่ายบัญชี" },
@@ -1111,6 +1113,47 @@
     }
     var maxTrend = Math.max.apply(null, [1].concat(trend.map(function (x) { return x.value; })));
 
+    // ---- monthly comparison (last 12 calendar months, independent of the range filter above) ----
+    var monthlyMap = {};
+    state.entries.forEach(function (e) {
+      var mkey = e.date.slice(0, 7);
+      if (!monthlyMap[mkey]) monthlyMap[mkey] = { value: 0, count: 0 };
+      monthlyMap[mkey].value += e.totalAmount;
+      monthlyMap[mkey].count += 1;
+    });
+    var monthlyTrend = [];
+    for (var mi = 11; mi >= 0; mi--) {
+      var md = new Date();
+      md.setDate(1);
+      md.setMonth(md.getMonth() - mi);
+      var mkey2 = md.getFullYear() + "-" + String(md.getMonth() + 1).padStart(2, "0");
+      var mBucket = monthlyMap[mkey2];
+      monthlyTrend.push({
+        key: mkey2,
+        label: THAI_MONTHS_SHORT[md.getMonth()] + " " + String(md.getFullYear() + 543).slice(-2),
+        value: mBucket ? mBucket.value : 0,
+        count: mBucket ? mBucket.count : 0
+      });
+    }
+    var maxMonthly = Math.max.apply(null, [1].concat(monthlyTrend.map(function (x) { return x.value; })));
+    var thisMonthEntry = monthlyTrend[monthlyTrend.length - 1];
+    var prevMonthEntry = monthlyTrend[monthlyTrend.length - 2];
+    var momChangeHtml = "";
+    if (prevMonthEntry) {
+      if (prevMonthEntry.value === 0 && thisMonthEntry.value === 0) {
+        momChangeHtml = '<span class="wt-mono" style="color:var(--text-muted);">ไม่มีข้อมูลเทียบ</span>';
+      } else if (prevMonthEntry.value === 0) {
+        momChangeHtml = '<span class="wt-mono" style="color:var(--danger);">เดือนก่อนไม่มีข้อมูล</span>';
+      } else {
+        var momPct = ((thisMonthEntry.value - prevMonthEntry.value) / prevMonthEntry.value) * 100;
+        var momUp = momPct > 0.05;
+        var momDown = momPct < -0.05;
+        var momColor = momUp ? "var(--danger)" : momDown ? "#4E9A5C" : "var(--text-muted)";
+        var momArrow = momUp ? "▲" : momDown ? "▼" : "—";
+        momChangeHtml = '<span class="wt-mono" style="color:' + momColor + ';font-weight:600;">' + momArrow + " " + Math.abs(momPct).toFixed(1) + "%</span>";
+      }
+    }
+
     function rangeBtn(k, l) { return '<button class="wt-range-btn ' + (state.range === k ? "active" : "") + '" data-action="setRange" data-range="' + k + '">' + l + "</button>"; }
 
     return (
@@ -1169,6 +1212,43 @@
                 '<div class="wt-gauge-val wt-mono">' + fmtBaht(x.value) + " บ.</div></div>";
             }).join("") + "</div>") +
         "</div>" +
+      "</div>" +
+
+      '<div class="wt-card" style="grid-column:1/-1;margin-bottom:16px;">' +
+        '<div class="wt-ledger-head"><h3 style="margin:0;border:none;padding:0;">เปรียบเทียบมูลค่าของเสียรายเดือน (12 เดือนล่าสุด)</h3>' +
+          (prevMonthEntry ? '<div class="wt-hint" style="margin:0;">เดือนนี้เทียบเดือนก่อน: ' + momChangeHtml + "</div>" : "") +
+        "</div>" +
+        '<div class="wt-trend">' + monthlyTrend.map(function (x) {
+          return '<div class="wt-trend-col" title="' + esc(x.label) + ": " + fmtBaht(x.value) + " บาท (" + x.count + ' รายการ)">' +
+            '<div class="wt-trend-bar" style="height:' + Math.max(2, (x.value / maxMonthly * 100)) + '%;"></div>' +
+            '<div class="wt-trend-label">' + esc(x.label) + "</div></div>";
+        }).join("") + "</div>" +
+
+        '<table class="wt-source-table" style="margin-top:18px;"><thead><tr>' +
+          '<th>เดือน</th><th style="text-align:right;">มูลค่ารวม</th><th style="text-align:right;">จำนวนรายการ</th><th style="text-align:right;">เทียบเดือนก่อน</th>' +
+        "</tr></thead><tbody>" +
+          monthlyTrend.map(function (x, i) {
+            var prev = i > 0 ? monthlyTrend[i - 1].value : null;
+            var change;
+            if (prev === null || (prev === 0 && x.value === 0)) {
+              change = '<span class="wt-mono" style="color:var(--text-muted);">–</span>';
+            } else if (prev === 0) {
+              change = '<span class="wt-mono" style="color:var(--danger);">ใหม่</span>';
+            } else {
+              var pct = ((x.value - prev) / prev) * 100;
+              var up = pct > 0.05, down = pct < -0.05;
+              var color = up ? "var(--danger)" : down ? "#4E9A5C" : "var(--text-muted)";
+              var arrow = up ? "▲" : down ? "▼" : "—";
+              change = '<span class="wt-mono" style="color:' + color + ';">' + arrow + " " + Math.abs(pct).toFixed(1) + "%</span>";
+            }
+            return "<tr>" +
+              "<td>" + esc(x.label) + "</td>" +
+              '<td class="wt-mono" style="text-align:right;">' + fmtBaht(x.value) + " บ.</td>" +
+              '<td class="wt-mono" style="text-align:right;">' + x.count + "</td>" +
+              '<td style="text-align:right;">' + change + "</td>" +
+              "</tr>";
+          }).join("") +
+        "</tbody></table>" +
       "</div>"
     );
   }
