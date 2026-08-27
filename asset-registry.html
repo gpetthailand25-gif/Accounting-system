@@ -393,9 +393,26 @@ function dashboardHtml(){
     const ql = q.toLowerCase();
     list = list.filter(i => (i.name||'').toLowerCase().includes(ql) || (i.code||'').toLowerCase().includes(ql) || (i.brand||'').toLowerCase().includes(ql) || (i.model||'').toLowerCase().includes(ql) || (i.location||'').toLowerCase().includes(ql));
   }
-  list.sort((a,b) => (a.code||'').localeCompare((b.code||''), 'th', { numeric: true, sensitivity: 'base' }));
+  const sortKey = (view.params && view.params.sortKey) || 'code';
+  const sortDir = (view.params && view.params.sortDir) || 'asc';
+  list = sortItems(list, sortKey, sortDir);
   const CAP = 150;
   const shown = list.slice(0, CAP);
+
+  const sortCols = [
+    { key: 'name', label: 'รายการ' },
+    { key: 'brand', label: 'ยี่ห้อ / รุ่น' },
+    { key: 'qty', label: 'จำนวน' },
+    { key: 'location', label: 'สถานที่' },
+    { key: 'purchaseDate', label: 'วันที่ซื้อ' },
+    { key: 'value', label: 'มูลค่า' },
+    { key: 'note', label: 'หมายเหตุ' },
+  ];
+  const theadRowHtml = `<tr><th></th>${sortCols.map(c => {
+    const active = sortKey === c.key;
+    const arrow = active ? (sortDir === 'desc' ? ' ▼' : ' ▲') : '';
+    return `<th data-sort-key="${c.key}" style="cursor:pointer;user-select:none;white-space:nowrap;">${escapeHtml(c.label)}${arrow}</th>`;
+  }).join('')}</tr>`;
 
   const rows = shown.map(i => `
     <tr data-open-item="${i.id}">
@@ -403,8 +420,8 @@ function dashboardHtml(){
         ${images[i.id] ? `<img src="${images[i.id]}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;border:1px solid var(--line);">` : `<div style="width:40px;height:40px;border-radius:4px;background:var(--surface-2);border:1px solid var(--line);"></div>`}
       </td>
       <td>
-        <div style="font-weight:500;">${escapeHtml(i.name||'(ไม่ระบุชื่อ)')}${docs[i.id] ? ' <span title="มีไฟล์เอกสารแนบ" style="font-size:12px;">📎</span>' : ''}</div>
         <div style="font-size:12px;color:var(--ink-soft);">${escapeHtml(i.code||'-')}</div>
+        <div style="font-weight:500;">${escapeHtml(i.name||'(ไม่ระบุชื่อ)')}${docs[i.id] ? ' <span title="มีไฟล์เอกสารแนบ" style="font-size:12px;">📎</span>' : ''}</div>
       </td>
       <td>${escapeHtml(i.brand||'-')} / ${escapeHtml(i.model||'-')}</td>
       <td>${escapeHtml(i.qty ?? '-')}</td>
@@ -449,7 +466,7 @@ function dashboardHtml(){
       </div>
     ` : `
       <table>
-        <thead><tr><th></th><th>รายการ</th><th>ยี่ห้อ / รุ่น</th><th>จำนวน</th><th>สถานที่</th><th>วันที่ซื้อ</th><th>มูลค่า</th><th>หมายเหตุ</th></tr></thead>
+        <thead>${theadRowHtml}</thead>
         <tbody>${rows}</tbody>
       </table>
     `}
@@ -596,6 +613,40 @@ function itemDetailHtml(itemId){
 }
 
 // ---------- HELPERS ----------
+function sortItems(list, sortKey, sortDir){
+  const key = sortKey || 'code';
+  const dir = sortDir === 'desc' ? -1 : 1;
+  const isNumeric = key === 'qty' || key === 'value';
+  const getVal = (i) => {
+    switch(key){
+      case 'name': return i.name || '';
+      case 'brand': return `${i.brand||''} ${i.model||''}`.trim();
+      case 'qty': return i.qty;
+      case 'location': return i.location || '';
+      case 'purchaseDate': return i.purchaseDate || '';
+      case 'value': return i.value;
+      case 'note': return i.note || '';
+      default: return i.code || '';
+    }
+  };
+  return list.slice().sort((a, b) => {
+    const va = getVal(a), vb = getVal(b);
+    if(isNumeric){
+      const na = (va===null || va===undefined || va==='') ? null : Number(va);
+      const nb = (vb===null || vb===undefined || vb==='') ? null : Number(vb);
+      if(na===null && nb===null) return 0;
+      if(na===null) return 1;
+      if(nb===null) return -1;
+      return (na - nb) * dir;
+    }
+    const sa = String(va||'');
+    const sb = String(vb||'');
+    if(!sa && sb) return 1;
+    if(sa && !sb) return -1;
+    if(!sa && !sb) return 0;
+    return sa.localeCompare(sb, 'th', { numeric: true, sensitivity: 'base' }) * dir;
+  });
+}
 function escapeHtml(s){ return (s===undefined||s===null) ? '' : String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function escapeAttr(s){ return escapeHtml(s); }
 
@@ -687,6 +738,16 @@ function attachHandlers(){
 
   document.querySelectorAll('[data-open-item]').forEach(tr => {
     tr.addEventListener('click', () => go('itemDetail', { itemId: tr.getAttribute('data-open-item'), cat: currentCat() }));
+  });
+
+  document.querySelectorAll('[data-sort-key]').forEach(th => {
+    th.addEventListener('click', () => {
+      const key = th.getAttribute('data-sort-key');
+      const curKey = (view.params && view.params.sortKey) || 'code';
+      const curDir = (view.params && view.params.sortDir) || 'asc';
+      const newDir = (curKey === key && curDir === 'asc') ? 'desc' : 'asc';
+      go('dashboard', { ...(view.params||{}), sortKey: key, sortDir: newDir });
+    });
   });
 
   const searchInput = document.getElementById('searchInput');
