@@ -23,6 +23,8 @@
 .pi-files{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;}
 .pi-file-link{font-size:12px;color:#2563eb;text-decoration:none;}
 .pi-file-link:hover{text-decoration:underline;}
+/* สำรอง: สีตราสัญลักษณ์ พ.ร.บ. ใช้เผื่อ style.css ยังไม่มีคลาส teal */
+.brand-mark.teal{background:#0f766e;color:#fff;font-size:11px;}
 </style>
 </head>
 <body>
@@ -39,13 +41,14 @@ const STORAGE_KEY_POLICIES_LEGACY = 'policies'; // คีย์เดิม (arr
 const POLICY_KEY_PREFIX = 'policy:';
 
 const KINDS = {
-  factory: { label: 'ประกันโรงงาน', addLabel: 'เพิ่มโรงงาน', mark: 'ปก', markClass: 'amber' },
-  vehicle: { label: 'ประกันรถยนต์', addLabel: 'เพิ่มรถยนต์', mark: 'รถ', markClass: 'blue' }
+  factory: { label: 'ประกันโรงงาน', addLabel: 'เพิ่มโรงงาน', mark: 'ปก', markClass: 'amber', assetType: 'factory' },
+  vehicle: { label: 'ประกันรถยนต์ (ภาคสมัครใจ)', addLabel: 'เพิ่มรถยนต์', mark: 'รถ', markClass: 'blue', assetType: 'vehicle' },
+  compulsory: { label: 'พ.ร.บ. รถยนต์', addLabel: null, mark: 'พรบ', markClass: 'teal', assetType: 'vehicle' }
 };
 
 let assets = [];
 let policies = [];
-let view = { name: 'dashboard', params: { kind: (new URLSearchParams(location.search).get('kind') === 'vehicle') ? 'vehicle' : 'factory' } };
+let view = { name: 'dashboard', params: { kind: KINDS[new URLSearchParams(location.search).get('kind')] ? new URLSearchParams(location.search).get('kind') : 'factory' } };
 
 // สถานะไฟล์แนบของฟอร์มกรมธรรม์ที่กำลังเปิดอยู่ (รีเซ็ตทุกครั้งที่เข้าฟอร์ม)
 // kept = ไฟล์เดิมที่เก็บเป็น base64 ไว้แล้ว (มี dataUrl), newFiles = ไฟล์ที่เพิ่งเลือกแต่ยังไม่แปลง (เป็น File object)
@@ -91,13 +94,21 @@ function policyStatus(p){
   if(days <= 30) return 'expiring';
   return 'active';
 }
-function latestPolicyFor(assetId){
-  const list = policies.filter(p => p.assetId === assetId);
+// kind ที่ส่งเข้ามา: ถ้าไม่ระบุ = ใช้กรมธรรม์ทั้งหมดของรายการนั้น (ไม่กรอง)
+// 'compulsory' = เฉพาะ พ.ร.บ. , 'vehicle' = เฉพาะภาคสมัครใจ (ไม่รวม พ.ร.บ.) , 'factory'/ไม่ระบุ = ทั้งหมด
+function policyMatchesKindFilter(p, kind){
+  if(!kind) return true;
+  if(kind === 'compulsory') return p.insClass === 'พ.ร.บ.';
+  if(kind === 'vehicle') return p.insClass !== 'พ.ร.บ.';
+  return true;
+}
+function latestPolicyFor(assetId, kind){
+  const list = policies.filter(p => p.assetId === assetId && policyMatchesKindFilter(p, kind));
   if(list.length === 0) return null;
   return list.slice().sort((a,b) => new Date(b.endDate||0) - new Date(a.endDate||0))[0];
 }
-function assetOverallStatus(assetId){
-  const list = policies.filter(p => p.assetId === assetId);
+function assetOverallStatus(assetId, kind){
+  const list = policies.filter(p => p.assetId === assetId && policyMatchesKindFilter(p, kind));
   if(list.length === 0) return 'none';
   const statuses = list.map(policyStatus);
   if(statuses.includes('expired')) return 'expired';
@@ -172,7 +183,8 @@ async function deletePolicyDoc(id){
 }
 
 function currentKind(){ return (view.params && view.params.kind) || 'factory'; }
-function kindAssets(kind){ return assets.filter(a => a.type === kind); }
+function assetTypeForKind(kind){ return (KINDS[kind] && KINDS[kind].assetType) || kind; }
+function kindAssets(kind){ return assets.filter(a => a.type === assetTypeForKind(kind)); }
 
 function go(name, params){
   view = { name, params: params||{} };
@@ -199,7 +211,7 @@ function topbarHtml(){
     </a>
     <nav class="tabs">
       <button data-nav="dashboard" data-kind="${kind}" class="${view.name==='dashboard'?'active':''}">แดชบอร์ด</button>
-      <button data-nav="assetForm" data-kind="${kind}" class="${view.name==='assetForm'?'active':''}">${k.addLabel}</button>
+      ${k.addLabel ? `<button data-nav="assetForm" data-kind="${kind}" class="${view.name==='assetForm'?'active':''}">${k.addLabel}</button>` : ''}
       <a class="btn" href="index.html" style="margin-left:4px;">หน้าหลัก</a>
     </nav>
   </header>`;
@@ -211,6 +223,7 @@ function kindTabsHtml(){
   <div class="type-switch" style="margin-bottom:18px;">
     <button type="button" data-select-kind="factory" class="${active==='factory'?'active':''}">${KINDS.factory.label}</button>
     <button type="button" data-select-kind="vehicle" class="${active==='vehicle'?'active':''}">${KINDS.vehicle.label}</button>
+    <button type="button" data-select-kind="compulsory" class="${active==='compulsory'?'active':''}">${KINDS.compulsory.label}</button>
   </div>`;
 }
 
@@ -226,7 +239,7 @@ function bodyHtml(){
 function dashboardHtml(){
   const kind = currentKind();
   const list0 = kindAssets(kind);
-  const kindPolicies = policies.filter(p => list0.some(a => a.id === p.assetId));
+  const kindPolicies = policies.filter(p => list0.some(a => a.id === p.assetId) && policyMatchesKindFilter(p, kind));
   const activePolicies = kindPolicies.filter(p => policyStatus(p) === 'active' || policyStatus(p)==='expiring').length;
   const expiringSoon = kindPolicies.filter(p => policyStatus(p) === 'expiring').length;
   const expired = kindPolicies.filter(p => policyStatus(p) === 'expired').length;
@@ -239,12 +252,12 @@ function dashboardHtml(){
     const ql = q.toLowerCase();
     list = list.filter(a => (a.name||'').toLowerCase().includes(ql) || (a.owner||'').toLowerCase().includes(ql) || (a.location||'').toLowerCase().includes(ql) || (a.plate||'').toLowerCase().includes(ql) || (a.brand||'').toLowerCase().includes(ql));
   }
-  if(statusFilter !== 'all') list = list.filter(a => assetOverallStatus(a.id) === statusFilter);
+  if(statusFilter !== 'all') list = list.filter(a => assetOverallStatus(a.id, kind) === statusFilter);
 
   const rows = list.map(a => {
-    const status = assetOverallStatus(a.id);
-    const lp = latestPolicyFor(a.id);
-    const sub = kind === 'vehicle' ? `${escapeHtml(a.plate||'-')} · ${escapeHtml(a.brand||'-')}` : escapeHtml(a.location||'-');
+    const status = assetOverallStatus(a.id, kind);
+    const lp = latestPolicyFor(a.id, kind);
+    const sub = a.type === 'vehicle' ? `${escapeHtml(a.plate||'-')} · ${escapeHtml(a.brand||'-')}` : escapeHtml(a.location||'-');
     return `
     <tr data-open-asset="${a.id}">
       <td>
@@ -257,7 +270,8 @@ function dashboardHtml(){
     </tr>`;
   }).join('');
 
-  const nounSubject = kind === 'vehicle' ? 'รถยนต์' : 'โรงงาน';
+  const nounSubject = (kind === 'vehicle' || kind === 'compulsory') ? 'รถยนต์' : 'โรงงาน';
+  const addBtnLabel = KINDS[kind].addLabel;
 
   return `
   <div class="grid-summary">
@@ -276,14 +290,14 @@ function dashboardHtml(){
       <option value="expired" ${statusFilter==='expired'?'selected':''}>หมดอายุ</option>
       <option value="none" ${statusFilter==='none'?'selected':''}>ไม่มีประกัน</option>
     </select>
-    <button class="btn btn-primary" id="btnAddAsset">+ ${KINDS[kind].addLabel}</button>
+    ${addBtnLabel ? `<button class="btn btn-primary" id="btnAddAsset">+ ${addBtnLabel}</button>` : ''}
   </div>
 
   <div class="card" style="padding:0;overflow:hidden;">
     ${list.length === 0 ? `
       <div class="empty">
-        <p>${list0.length===0 ? `ยังไม่มี${nounSubject}ในระบบ เริ่มต้นเพิ่มรายการแรกของคุณ` : 'ไม่พบรายการที่ตรงกับเงื่อนไข'}</p>
-        ${list0.length===0 ? `<button class="btn btn-primary" id="btnAddAssetEmpty">+ ${KINDS[kind].addLabel}</button>` : ''}
+        <p>${list0.length===0 ? (addBtnLabel ? `ยังไม่มี${nounSubject}ในระบบ เริ่มต้นเพิ่มรายการแรกของคุณ` : `ยังไม่มีรถยนต์ในระบบ กรุณาเพิ่มรถยนต์ในแท็บ "${KINDS.vehicle.label}" ก่อน`) : 'ไม่พบรายการที่ตรงกับเงื่อนไข'}</p>
+        ${(list0.length===0 && addBtnLabel) ? `<button class="btn btn-primary" id="btnAddAssetEmpty">+ ${addBtnLabel}</button>` : ''}
       </div>
     ` : `
       <table>
@@ -297,9 +311,10 @@ function dashboardHtml(){
 // ---------- ASSET FORM ----------
 function assetFormHtml(assetId){
   const kind = currentKind();
+  const assetType = assetTypeForKind(kind);
   const editing = assets.find(a => a.id === assetId);
 
-  const fields = kind === 'vehicle' ? `
+  const fields = assetType === 'vehicle' ? `
         <div class="field">
           <label>ทะเบียนรถ</label>
           <input type="text" name="plate" placeholder="เช่น กข-1234 กรุงเทพฯ" value="${escapeAttr(editing?.plate||'')}">
@@ -329,11 +344,11 @@ function assetFormHtml(assetId){
     <h2 style="margin:0 0 18px;font-size:17px;">${editing ? 'แก้ไขข้อมูล' : KINDS[kind].addLabel}</h2>
 
     <form id="assetForm">
-      <input type="hidden" name="type" value="${kind}">
+      <input type="hidden" name="type" value="${assetType}">
       <div class="form-grid">
         <div class="field full">
           <label>ชื่อรายการ / ป้ายชื่อ</label>
-          <input type="text" name="name" required placeholder="${kind==='vehicle'?'เช่น รถกระบะสำนักงาน 1':'เช่น โรงงานสาขาระยอง'}" value="${escapeAttr(editing?.name||'')}">
+          <input type="text" name="name" required placeholder="${assetType==='vehicle'?'เช่น รถกระบะสำนักงาน 1':'เช่น โรงงานสาขาระยอง'}" value="${escapeAttr(editing?.name||'')}">
         </div>
         <div class="field">
           <label>ผู้ครอบครอง / หน่วยงานที่ดูแล</label>
@@ -359,10 +374,11 @@ function assetFormHtml(assetId){
 function assetDetailHtml(assetId){
   const a = assets.find(x => x.id === assetId);
   if(!a) return `<p>ไม่พบรายการ</p>`;
-  const kind = a.type;
+  const assetType = a.type;
+  const kind = (view.params && view.params.kind) || assetType; // แท็บที่ใช้อ้างอิงตอนย้อนกลับ
   const assetPolicies = policies.filter(p => p.assetId === assetId).slice().sort((x,y) => new Date(y.endDate||0)-new Date(x.endDate||0));
 
-  const kvRows = kind === 'vehicle' ? `
+  const kvRows = assetType === 'vehicle' ? `
     <div><span class="k">ทะเบียนรถ</span><span class="v">${escapeHtml(a.plate||'-')}</span></div>
     <div><span class="k">ยี่ห้อ / รุ่น</span><span class="v">${escapeHtml(a.brand||'-')}</span></div>
     <div><span class="k">ปีที่จดทะเบียน</span><span class="v">${escapeHtml(a.year||'-')}</span></div>
@@ -422,14 +438,17 @@ function assetDetailHtml(assetId){
 function policyFormHtml(assetId, policyId){
   const a = assets.find(x => x.id === assetId);
   if(!a) return `<p>ไม่พบรายการ</p>`;
-  const kind = a.type;
+  const assetType = a.type;
   const editing = policies.find(p => p.id === policyId);
+  const originKind = (view.params && view.params.kind) || assetType; // แท็บที่กดเข้ามา (ใช้ตอนย้อนกลับ)
+  // ถือว่าเป็น พ.ร.บ. ถ้าเข้ามาจากแท็บ พ.ร.บ. โดยตรง หรือกำลังแก้ไขกรมธรรม์ที่เป็น พ.ร.บ. อยู่แล้ว
+  const isCompulsory = originKind === 'compulsory' || editing?.insClass === 'พ.ร.บ.';
   policyFileState = { kept: (editing?.docFiles || []).slice(), newFiles: [] };
 
   return `
-  <div class="back-row"><button class="btn-ghost" data-nav="assetDetail" data-asset="${assetId}" data-kind="${kind}">← กลับหน้ารายการ</button></div>
+  <div class="back-row"><button class="btn-ghost" data-nav="assetDetail" data-asset="${assetId}" data-kind="${originKind}">← กลับหน้ารายการ</button></div>
   <div class="card" style="max-width:560px;">
-    <h2 style="margin:0 0 4px;font-size:17px;">${editing ? 'แก้ไขกรมธรรม์' : 'เพิ่มกรมธรรม์ประกัน'}</h2>
+    <h2 style="margin:0 0 4px;font-size:17px;">${editing ? 'แก้ไขกรมธรรม์' : (isCompulsory ? 'เพิ่ม พ.ร.บ. รถยนต์' : 'เพิ่มกรมธรรม์ประกัน')}</h2>
     <p style="margin:0 0 18px;color:var(--ink-soft);font-size:13px;">สำหรับ ${escapeHtml(a.name)}</p>
 
     <form id="policyForm">
@@ -442,7 +461,13 @@ function policyFormHtml(assetId, policyId){
           <label>เลขที่กรมธรรม์</label>
           <input type="text" name="policyNumber" placeholder="เลขที่กรมธรรม์" value="${escapeAttr(editing?.policyNumber||'')}">
         </div>
-        ${kind === 'vehicle' ? `
+        ${assetType === 'vehicle' ? (isCompulsory ? `
+        <div class="field">
+          <label>ประเภทประกัน</label>
+          <input type="text" value="พ.ร.บ. (ภาคบังคับ)" disabled>
+          <input type="hidden" name="insClass" value="พ.ร.บ.">
+        </div>
+        ` : `
         <div class="field">
           <label>ประเภทประกัน</label>
           <select name="insClass">
@@ -450,10 +475,9 @@ function policyFormHtml(assetId, policyId){
             <option value="ชั้น 2+" ${editing?.insClass==='ชั้น 2+'?'selected':''}>ชั้น 2+</option>
             <option value="ชั้น 3+" ${editing?.insClass==='ชั้น 3+'?'selected':''}>ชั้น 3+</option>
             <option value="ชั้น 3" ${editing?.insClass==='ชั้น 3'?'selected':''}>ชั้น 3</option>
-            <option value="พ.ร.บ." ${editing?.insClass==='พ.ร.บ.'?'selected':''}>พ.ร.บ.</option>
           </select>
         </div>
-        ` : ''}
+        `) : ''}
         <div class="field">
           <label>เบี้ยประกัน (บาท)</label>
           <input type="number" name="premium" placeholder="0" value="${escapeAttr(editing?.premium||'')}">
@@ -483,7 +507,7 @@ function policyFormHtml(assetId, policyId){
 
       <div class="form-actions">
         ${editing ? `<button type="button" class="btn btn-danger" id="btnDeletePolicy">ลบกรมธรรม์</button>` : ''}
-        <button type="button" class="btn" data-nav="assetDetail" data-asset="${assetId}" data-kind="${kind}">ยกเลิก</button>
+        <button type="button" class="btn" data-nav="assetDetail" data-asset="${assetId}" data-kind="${originKind}">ยกเลิก</button>
         <button type="submit" class="btn btn-primary">${editing ? 'บันทึกการแก้ไข' : 'บันทึกกรมธรรม์'}</button>
       </div>
     </form>
@@ -574,7 +598,7 @@ function attachHandlers(){
       const fd = new FormData(assetForm);
       const data = Object.fromEntries(fd.entries());
       const editingId = view.params && view.params.assetId;
-      const kind = data.type;
+      const originKind = (view.params && view.params.kind) || data.type;
       if(editingId){
         const idx = assets.findIndex(a => a.id === editingId);
         assets[idx] = { ...assets[idx], ...data };
@@ -582,7 +606,7 @@ function attachHandlers(){
         assets.push({ id: uid(), createdAt: todayStr(), ...data });
       }
       await saveAssets();
-      go('dashboard', { kind });
+      go('dashboard', { kind: originKind });
     });
   }
   const btnDeleteAsset = document.getElementById('btnDeleteAsset');
