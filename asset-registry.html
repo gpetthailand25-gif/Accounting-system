@@ -394,13 +394,13 @@ function dashboardHtml(){
     list = list.filter(i => (i.name||'').toLowerCase().includes(ql) || (i.code||'').toLowerCase().includes(ql) || (i.brand||'').toLowerCase().includes(ql) || (i.model||'').toLowerCase().includes(ql) || (i.location||'').toLowerCase().includes(ql));
   }
   const sortKey = (view.params && view.params.sortKey) || 'code';
-  const sortDir = (view.params && view.params.sortDir) || 'asc';
+  const sortDir = (view.params && view.params.sortDir) || 'desc';
   list = sortItems(list, sortKey, sortDir);
   const CAP = 150;
   const shown = list.slice(0, CAP);
 
   const sortCols = [
-    { key: 'name', label: 'รายการ' },
+    { key: 'name', label: 'รายการ', defaultDir: 'desc' },
     { key: 'brand', label: 'ยี่ห้อ / รุ่น' },
     { key: 'qty', label: 'จำนวน' },
     { key: 'location', label: 'สถานที่' },
@@ -411,7 +411,7 @@ function dashboardHtml(){
   const theadRowHtml = `<tr><th></th>${sortCols.map(c => {
     const active = sortKey === c.key;
     const arrow = active ? (sortDir === 'desc' ? ' ▼' : ' ▲') : '';
-    return `<th data-sort-key="${c.key}" style="cursor:pointer;user-select:none;white-space:nowrap;">${escapeHtml(c.label)}${arrow}</th>`;
+    return `<th data-sort-key="${c.key}" data-default-dir="${c.defaultDir || 'asc'}" style="cursor:pointer;user-select:none;white-space:nowrap;">${escapeHtml(c.label)}${arrow}</th>`;
   }).join('')}</tr>`;
 
   const rows = shown.map(i => `
@@ -619,7 +619,7 @@ function sortItems(list, sortKey, sortDir){
   const isNumeric = key === 'qty' || key === 'value';
   const getVal = (i) => {
     switch(key){
-      case 'name': return i.name || '';
+      case 'name': return i.code || '';
       case 'brand': return `${i.brand||''} ${i.model||''}`.trim();
       case 'qty': return i.qty;
       case 'location': return i.location || '';
@@ -743,9 +743,10 @@ function attachHandlers(){
   document.querySelectorAll('[data-sort-key]').forEach(th => {
     th.addEventListener('click', () => {
       const key = th.getAttribute('data-sort-key');
+      const defaultDir = th.getAttribute('data-default-dir') || 'asc';
       const curKey = (view.params && view.params.sortKey) || 'code';
-      const curDir = (view.params && view.params.sortDir) || 'asc';
-      const newDir = (curKey === key && curDir === 'asc') ? 'desc' : 'asc';
+      const curDir = (view.params && view.params.sortDir) || 'desc';
+      const newDir = (curKey === key) ? (curDir === 'asc' ? 'desc' : 'asc') : defaultDir;
       go('dashboard', { ...(view.params||{}), sortKey: key, sortDir: newDir });
     });
   });
