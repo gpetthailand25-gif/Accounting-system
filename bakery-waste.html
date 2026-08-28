@@ -1763,8 +1763,8 @@
       '<div class="pr-title">รายงานบันทึกปัญหาการผลิตประจำวัน</div>' +
 
       '<table class="pr-table"><thead><tr>' +
-        '<th style="width:4%;">ลำดับ</th><th style="width:9%;">เลขที่</th><th style="width:8%;">วันที่</th><th style="width:8%;">รูป</th>' +
-        '<th style="width:22%;">รายการ (ปัญหาที่พบ)</th><th style="width:20%;">แนวทางแก้ไข</th><th style="width:20%;">สรุปผลหลังแก้ไข</th><th style="width:9%;">สถานะ</th>' +
+        '<th style="width:4%;">ลำดับ</th><th style="width:7%;">เลขที่</th><th style="width:7%;">วันที่</th><th style="width:24%;">รูป</th>' +
+        '<th style="width:18%;">รายการ (ปัญหาที่พบ)</th><th style="width:16%;">แนวทางแก้ไข</th><th style="width:16%;">สรุปผลหลังแก้ไข</th><th style="width:8%;">สถานะ</th>' +
       "</tr></thead><tbody>" + bodyRows + "</tbody></table>" +
 
       '<div class="pr-sign-grid">' +
@@ -2014,7 +2014,7 @@
         state.printDefaults = {
           start: state.rangeStart,
           end: state.rangeEnd,
-          docNumber: "WR-" + todayStr().replace(/-/g, "") + "-" + String(state.entries.length + 1).padStart(3, "0")
+          docNumber: buildDocNumber(state.rangeStart)
         };
         state.printModalOpen = true;
         render(); break;
@@ -2042,6 +2042,10 @@
     else if (e.target.id === "prodLogDateToField") { state.prodLogDateTo = e.target.value; render(); }
     else if (e.target.id === "dashStartField") { state.rangeStart = e.target.value; state.range = "custom"; render(); }
     else if (e.target.id === "dashEndField") { state.rangeEnd = e.target.value; state.range = "custom"; render(); }
+    else if (e.target.id === "printStartDate") {
+      var docField = document.getElementById("printDocNumber");
+      if (docField) docField.value = buildDocNumber(e.target.value);
+    }
   });
 
   document.getElementById("app").addEventListener("input", function (e) {
@@ -2088,6 +2092,12 @@
     if (e.target.id === "productSearchField" && e.key === "Escape") closeProductCombo();
   });
 
+  // Document number always runs off the report's start date (จากวันที่), not
+  // today's date, so it stays correct even when printing for a past period.
+  function buildDocNumber(startDate) {
+    return "WR-" + String(startDate || todayStr()).replace(/-/g, "") + "-" + String(state.entries.length + 1).padStart(3, "0");
+  }
+
   function handleGeneratePrint() {
     var start = document.getElementById("printStartDate").value;
     var end = document.getElementById("printEndDate").value;
@@ -2120,7 +2130,7 @@
       ".pr-r { text-align: right; word-break: break-word; }" +
       ".pr-sub { font-size: 10px; color: #555; word-wrap: break-word; overflow-wrap: break-word; }" +
       ".pr-mono { font-family: 'Consolas', 'Courier New', monospace; font-size: 10.5px; word-break: break-all; }" +
-      ".pr-photo { width: 42px; height: 42px; object-fit: cover; border-radius: 4px; border: 1px solid #999; display: block; margin: 0 auto; }" +
+      ".pr-photo { width: 4cm; height: 4cm; object-fit: cover; border-radius: 4px; border: 1px solid #999; display: block; margin: 0 auto; }" +
       ".pr-total-row td { font-weight: 700; border-top: 2px solid #111; }" +
       ".pr-notes { margin-bottom: 26px; }" +
       ".pr-notes .lbl { font-weight: 600; margin-bottom: 8px; }" +
@@ -2203,8 +2213,8 @@
       '<div class="pr-title">รายการสินค้าเสียหาย</div>' +
 
       '<table class="pr-table"><thead><tr>' +
-        "<th style=\"width:4%;\">ลำดับ</th><th style=\"width:9%;\">เลขที่รายการ</th><th style=\"width:8%;\">รูปภาพ</th><th style=\"width:17%;\">รายการสินค้าเสียหาย</th>" +
-        "<th style=\"width:8%;\">จำนวนที่เสียหาย</th><th style=\"width:9%;\">จำนวนเงิน (บาท)</th><th style=\"width:22%;\">สาเหตุ &amp; แนวทางแก้ไข</th><th>หมายเหตุ</th>" +
+        "<th style=\"width:3%;\">ลำดับ</th><th style=\"width:7%;\">เลขที่รายการ</th><th style=\"width:24%;\">รูปภาพ</th><th style=\"width:14%;\">รายการสินค้าเสียหาย</th>" +
+        "<th style=\"width:7%;\">จำนวนที่เสียหาย</th><th style=\"width:8%;\">จำนวนเงิน (บาท)</th><th style=\"width:19%;\">สาเหตุ &amp; แนวทางแก้ไข</th><th>หมายเหตุ</th>" +
       "</tr></thead><tbody>" +
         bodyRows +
         '<tr class="pr-total-row"><td colspan="5" class="pr-r">รวมทั้งสิ้น</td><td class="pr-r">' + fmtBaht(total) + "</td><td></td><td></td></tr>" +
