@@ -556,7 +556,49 @@
   }
 
   // ================= RENDER =================
+  // Capture whatever the user is mid-typing (value + cursor position) before a
+  // full re-render replaces the DOM out from under them — e.g. when another
+  // device's Firestore update triggers render() while this device is typing.
+  function captureLiveFormState() {
+    var active = document.activeElement;
+    if (!active || !active.id) return null;
+    var form = active.closest && active.closest("form");
+    if (!form || !form.id) return null;
+    var fields = form.querySelectorAll("input, select, textarea");
+    var values = {};
+    for (var i = 0; i < fields.length; i++) {
+      var el = fields[i];
+      if (!el.id || el.type === "file") continue;
+      values[el.id] = el.value;
+    }
+    var selection = null;
+    if (typeof active.selectionStart === "number") {
+      selection = { start: active.selectionStart, end: active.selectionEnd };
+    }
+    return { formId: form.id, activeId: active.id, values: values, selection: selection };
+  }
+
+  function restoreLiveFormState(snap) {
+    if (!snap) return;
+    var form = document.getElementById(snap.formId);
+    if (!form) return; // user navigated away mid-render; nothing to restore
+    Object.keys(snap.values).forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el && el.value !== snap.values[id]) el.value = snap.values[id];
+    });
+    if (snap.formId === "entryForm") { updateTotalDisplay(); updateStatusPreview(); }
+    if (snap.formId === "prodLogForm") updateProdStatusPreview();
+    var activeEl = document.getElementById(snap.activeId);
+    if (activeEl) {
+      activeEl.focus();
+      if (snap.selection && typeof activeEl.setSelectionRange === "function") {
+        try { activeEl.setSelectionRange(snap.selection.start, snap.selection.end); } catch (err) { /* ignore */ }
+      }
+    }
+  }
+
   function render() {
+    var liveForm = captureLiveFormState();
     var app = document.getElementById("app");
     if (!state.role) { app.innerHTML = renderLogin(); return; }
     if (ROLE_ALLOWED_TABS[state.role].indexOf(state.tab) === -1) state.tab = "entry";
@@ -574,6 +616,7 @@
       renderDeleteConfirmProductModal() +
       renderDeleteConfirmProdLogModal();
     updateSaveIndicator();
+    restoreLiveFormState(liveForm);
   }
 
   function renderHeader() {
@@ -2018,6 +2061,15 @@
   document.getElementById("app").addEventListener("blur", function (e) {
     if (e.target.id === "productSearchField") handleProductSearchBlur(e.target);
   }, true);
+
+  // Prevent the browser's default "scroll wheel changes a focused number
+  // input's value" behavior — otherwise scrolling the page while the mouse
+  // happens to be over จำนวน/ราคาต่อหน่วย silently edits the number.
+  document.getElementById("app").addEventListener("wheel", function (e) {
+    if (e.target && e.target.tagName === "INPUT" && e.target.type === "number") {
+      e.target.blur();
+    }
+  }, { passive: true });
 
   document.getElementById("app").addEventListener("keydown", function (e) {
     var actionKey = e.target.getAttribute && e.target.getAttribute("data-enter-action");
