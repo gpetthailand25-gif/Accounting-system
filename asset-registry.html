@@ -449,6 +449,7 @@ function render(){
 
   app.innerHTML = `<div id="stickyHeader" style="position:sticky;top:0;z-index:100;background:#fff;box-shadow:0 1px 0 var(--line);">${topbarHtml()}${categoryTabsHtml()}</div>` + bodyHtml();
   attachHandlers();
+  positionListHeader();
 
   // คืนโฟกัส/ตำแหน่งเคอร์เซอร์กลับไปที่ element เดิม (เช่น ช่องค้นหา)
   if (focusInfo) {
@@ -461,6 +462,16 @@ function render(){
     }
   }
 }
+
+function positionListHeader(){
+  const headerEl = document.getElementById('stickyHeader');
+  const theadRow = document.getElementById('listTheadRow');
+  if(!headerEl || !theadRow) return;
+  const top = headerEl.offsetHeight;
+  theadRow.style.top = top + 'px';
+  theadRow.querySelectorAll('th').forEach(th => { th.style.top = top + 'px'; });
+}
+window.addEventListener('resize', positionListHeader);
 
 function topbarHtml(){
   return `
@@ -528,10 +539,10 @@ function dashboardHtml(){
     { key: 'value', label: 'มูลค่า' },
     { key: 'note', label: 'หมายเหตุ' },
   ];
-  const theadRowHtml = `<tr><th></th>${sortCols.map(c => {
+  const theadRowHtml = `<tr id="listTheadRow" style="position:sticky;z-index:90;"><th style="position:sticky;left:0;background:#fff;"></th>${sortCols.map(c => {
     const active = sortKey === c.key;
     const arrow = active ? (sortDir === 'desc' ? ' ▼' : ' ▲') : '';
-    return `<th data-sort-key="${c.key}" data-default-dir="${c.defaultDir || 'asc'}" style="cursor:pointer;user-select:none;white-space:nowrap;">${escapeHtml(c.label)}${arrow}</th>`;
+    return `<th data-sort-key="${c.key}" data-default-dir="${c.defaultDir || 'asc'}" style="cursor:pointer;user-select:none;white-space:nowrap;position:sticky;background:#fff;">${escapeHtml(c.label)}${arrow}</th>`;
   }).join('')}</tr>`;
 
   const rows = shown.map(i => `
