@@ -177,6 +177,29 @@
   }
   .requester-name { font-family: var(--font-display); font-weight: 700; font-size: 15px; color: var(--purple-text); }
   .requester-totals { font-size: 12.5px; color: var(--ink-light); font-weight: 600; }
+  .exec-letterhead {
+    text-align: center; padding: 18px 0 20px; border-bottom: 2px solid var(--purple);
+    margin-bottom: 20px;
+  }
+  .exec-org { font-size: 12px; letter-spacing: 1px; text-transform: uppercase; color: var(--purple-text); font-weight: 700; margin-bottom: 6px; }
+  .exec-title { font-family: var(--font-display); font-size: 22px; margin: 0 0 6px; color: var(--ink); }
+  .exec-meta { font-size: 12.5px; color: var(--ink-light); }
+  .exec-section { margin-bottom: 22px; }
+  .exec-section-title {
+    font-family: var(--font-display); font-size: 14.5px; font-weight: 700; color: var(--purple-text);
+    border-left: 4px solid var(--purple); padding-left: 9px; margin: 0 0 12px;
+  }
+  .exec-highlight-box {
+    background: var(--purple-bg); border-radius: 14px; padding: 16px 18px;
+  }
+  .exec-highlight-box ul { margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.85; color: var(--ink); }
+  .exec-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; font-size: 12.5px; }
+  .exec-bar-label { width: 160px; flex-shrink: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .exec-bar-track { flex: 1; background: var(--surface-soft); border-radius: 7px; height: 18px; overflow: hidden; }
+  .exec-bar-fill { height: 100%; background: var(--purple); border-radius: 7px; }
+  .exec-bar-value { width: 110px; text-align: right; flex-shrink: 0; font-weight: 700; font-family: var(--font-display); }
+  .exec-meta-fields { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .exec-meta-fields .field { margin-bottom: 0; min-width: 220px; flex: 1; }
   table.sr-table thead th.sortable { cursor: pointer; user-select: none; }
   table.sr-table thead th.sortable:hover { color: var(--purple-text); }
   table.sr-table thead th.sortable.active { color: var(--purple-text); }
@@ -303,6 +326,20 @@
   .combo-name { flex: 1; font-weight: 600; }
   .combo-qty { font-size: 12px; color: var(--ink-light); flex-shrink: 0; }
   .combo-empty { padding: 16px; text-align: center; color: var(--ink-light); font-size: 13px; }
+  .combo-input-clearable { padding-right: 34px; }
+  .combo-add { color: var(--purple-text); font-weight: 600; }
+  .combo-option-edit { display: flex; align-items: center; gap: 6px; cursor: default; }
+  .combo-option-edit:hover { background: transparent; }
+  .combo-edit-input {
+    flex: 1; border: 1.5px solid var(--purple); border-radius: 8px; padding: 6px 8px;
+    font-size: 13px; font-family: var(--font-body); color: var(--ink);
+  }
+  .combo-edit-input:focus { outline: none; }
+  .combo-edit-btn {
+    border: none; background: transparent; color: var(--ink-light); font-size: 13px;
+    padding: 4px 6px; border-radius: 8px; flex-shrink: 0;
+  }
+  .combo-edit-btn:hover { background: var(--purple-bg); color: var(--purple-text); }
 
   /* ---- Receive / Issue forms ---- */
   .sr-form-wrap { display: grid; grid-template-columns: 330px 1fr; gap: 24px; }
@@ -392,7 +429,13 @@
     reqFrom: firstDayOfMonthStr(),
     reqTo: todayStr(),
     reqSearch: '',
+    requesters: [],
+    execFrom: firstDayOfMonthStr(),
+    execTo: todayStr(),
+    execOrgName: '',
+    execPreparedBy: '',
     editingId: null,
+    editingTxId: null,
     configured: false,
     showImport: false,
     toast: null,
@@ -406,6 +449,15 @@
   function firstDayOfMonthStr(){
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
+  }
+  function firstDayOfQuarterStr(){
+    const now = new Date();
+    const q = Math.floor(now.getMonth() / 3);
+    return new Date(now.getFullYear(), q * 3, 1).toISOString().slice(0,10);
+  }
+  function firstDayOfYearStr(){
+    const now = new Date();
+    return new Date(now.getFullYear(), 0, 1).toISOString().slice(0,10);
   }
   function fmtDate(d){
     try {
@@ -434,6 +486,21 @@
       {id: uid('tx'), itemId: state.items[2].id, type:'in', qty:10, date: now, note:'สต็อกเริ่มต้น'},
       {id: uid('tx'), itemId: state.items[2].id, type:'out', qty:2, date: now, note:'เบิกใช้แผนกบัญชี', requester:'สมชาย (บัญชี)'},
     ];
+    state.requesters = [{id: uid('req'), name:'สมชาย (บัญชี)'}];
+  }
+
+  function ensureRequestersIncludeHistory(){
+    if (!Array.isArray(state.requesters)) state.requesters = [];
+    const known = new Set(state.requesters.map(r => r.name.toLowerCase()));
+    state.transactions.forEach(t => {
+      const name = (t.requester || '').trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (!known.has(key)) {
+        known.add(key);
+        state.requesters.push({id: uid('req'), name});
+      }
+    });
   }
 
   const FIRESTORE_COLLECTION = 'stockroom';
@@ -464,6 +531,8 @@
         const data = snap.data() || {};
         state.items = (data.items || []).map(i => ({price:0, code:'', image:'', ...i}));
         state.transactions = data.transactions || [];
+        state.requesters = data.requesters || [];
+        ensureRequestersIncludeHistory();
       } else {
         seedDefault();
         try { await saveData(); } catch(e2){ /* doc will be created on next successful save */ }
@@ -483,6 +552,7 @@
     await docRef().set({
       items: state.items,
       transactions: state.transactions,
+      requesters: state.requesters,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
   }
@@ -576,6 +646,30 @@
     render();
   }
 
+  async function addRequesterName(name){
+    name = (name || '').trim();
+    if (!name) return null;
+    const existing = state.requesters.find(r => r.name.toLowerCase() === name.toLowerCase());
+    if (existing) return existing;
+    const req = {id: uid('req'), name};
+    state.requesters.push(req);
+    try { await saveData(); } catch(e){ showToast('บันทึกรายชื่อไม่สำเร็จ', 'warn'); }
+    return req;
+  }
+
+  async function renameRequester(id, newName){
+    newName = (newName || '').trim();
+    if (!newName) { showToast('กรุณากรอกชื่อ', 'warn'); return false; }
+    const req = state.requesters.find(r => r.id === id);
+    if (!req) return false;
+    if (state.requesters.some(r => r.id !== id && r.name.toLowerCase() === newName.toLowerCase())) {
+      showToast('มีชื่อนี้อยู่แล้ว', 'warn'); return false;
+    }
+    req.name = newName;
+    try { await saveData(); } catch(e){ showToast('บันทึกไม่สำเร็จ', 'warn'); }
+    return true;
+  }
+
   async function moveStock(itemId, type, qty, date, note, requester){
     qty = Number(qty);
     const item = itemById(itemId);
@@ -584,11 +678,16 @@
     if (type === 'out' && qty > item.qty) { showToast('จำนวนคงเหลือไม่พอสำหรับตัดออก', 'warn'); return; }
     if (type === 'out' && !(requester || '').trim()) { showToast('กรุณากรอกชื่อคนเบิก', 'warn'); return; }
     item.qty += (type === 'in' ? qty : -qty);
+    const requesterName = type === 'out' ? (requester || '').trim() : '';
     state.transactions.unshift({
       id: uid('tx'), itemId, type, qty,
       date: date || todayStr(), note: (note || '').trim(),
-      requester: type === 'out' ? (requester || '').trim() : ''
+      requester: requesterName
     });
+    if (type === 'out' && requesterName) {
+      const exists = state.requesters.some(r => r.name.toLowerCase() === requesterName.toLowerCase());
+      if (!exists) state.requesters.push({id: uid('req'), name: requesterName});
+    }
     try {
       await saveData();
       showToast(type === 'in' ? 'บันทึกรับเข้าแล้ว' : 'บันทึกตัดออกแล้ว');
@@ -628,6 +727,8 @@
     if (!confirm('นำเข้า ' + parsed.items.length + ' รายการวัสดุ และแทนที่ข้อมูลปัจจุบันทั้งหมดใน Firebase ใช่หรือไม่? การกระทำนี้ย้อนกลับไม่ได้')) return;
     state.items = parsed.items.map(i => ({price:0, code:'', image:'', ...i}));
     state.transactions = parsed.transactions || [];
+    state.requesters = parsed.requesters || [];
+    ensureRequestersIncludeHistory();
     state.showImport = false;
     try { await saveData(); showToast('นำเข้าข้อมูล ' + state.items.length + ' รายการสำเร็จ! บันทึกขึ้น Firebase แล้ว'); }
     catch(e){ showToast('บันทึกขึ้น Firebase ไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองใหม่', 'warn'); }
@@ -1072,11 +1173,273 @@
 
 
 
+  function computeExecutiveData(from, to){
+    const reportData = computeReportData(from, to);
+    const requesterData = computeRequesterData(from, to, '');
+    const topIssuedItems = reportData.perItem
+      .filter(r => r.issuedValue > 0)
+      .slice()
+      .sort((a, b) => b.issuedValue - a.issuedValue)
+      .slice(0, 5);
+    const topReceivedItems = reportData.perItem
+      .filter(r => r.receivedValue > 0)
+      .slice()
+      .sort((a, b) => b.receivedValue - a.receivedValue)
+      .slice(0, 5);
+    const lowStockItems = state.items
+      .filter(i => i.qty <= i.minQty)
+      .slice()
+      .sort((a, b) => (a.qty - a.minQty) - (b.qty - b.minQty));
+    const topRequesters = requesterData.list.slice(0, 5);
+    const netValue = reportData.totals.receivedValue - reportData.totals.issuedValue;
+    return { reportData, requesterData, topIssuedItems, topReceivedItems, lowStockItems, topRequesters, netValue };
+  }
+
+  function executiveHighlights(data){
+    const list = [];
+    if (state.items.length > 0) {
+      const mostValuable = state.items.slice().sort((a, b) => (b.qty*(b.price||0)) - (a.qty*(a.price||0)))[0];
+      if (mostValuable && mostValuable.qty * (mostValuable.price||0) > 0) {
+        list.push('วัสดุที่มีมูลค่าคงเหลือสูงสุด: ' + mostValuable.name + ' (฿' + fmtMoney(mostValuable.qty*(mostValuable.price||0)) + ')');
+      }
+    }
+    if (data.lowStockItems.length > 0) {
+      const worst = data.lowStockItems[0];
+      list.push('รายการที่ใกล้หมดมากที่สุด: ' + worst.name + ' (คงเหลือ ' + worst.qty + ' ' + worst.unit + ', ขั้นต่ำ ' + worst.minQty + ')');
+    }
+    if (data.topRequesters.length > 0) {
+      const top = data.topRequesters[0];
+      list.push('ผู้เบิกที่มีมูลค่าการเบิกสูงสุดในช่วงนี้: ' + top.label + ' (฿' + fmtMoney(top.totalValue) + ')');
+    }
+    if (data.topIssuedItems.length > 0) {
+      const topOut = data.topIssuedItems[0];
+      list.push('วัสดุที่ถูกเบิกออกมากที่สุดในช่วงนี้: ' + topOut.item.name + ' (' + topOut.issuedQty + ' ' + escapeHtml(topOut.item.unit) + ', ฿' + fmtMoney(topOut.issuedValue) + ')');
+    }
+    if (data.reportData.totals.receivedValue > 0 || data.reportData.totals.issuedValue > 0) {
+      const net = data.netValue;
+      list.push('มูลค่าสุทธิในช่วงนี้ (รับเข้า − เบิกออก): ' + (net >= 0 ? '+' : '') + '฿' + fmtMoney(net));
+    }
+    if (list.length === 0) list.push('ยังไม่มีข้อมูลเพียงพอสำหรับสรุปในช่วงเวลานี้');
+    return list;
+  }
+
+  function execBarRowsHTML(rows, labelFn, valueFn, formatFn){
+    if (rows.length === 0) return '<div class="empty-state">ไม่มีข้อมูลในช่วงนี้</div>';
+    const max = Math.max.apply(null, rows.map(valueFn).concat([1]));
+    return rows.map(r => {
+      const v = valueFn(r);
+      const pct = Math.max(4, Math.round((v / max) * 100));
+      const label = labelFn(r);
+      return (
+        '<div class="exec-bar-row">' +
+          '<div class="exec-bar-label" title="' + escapeHtml(label) + '">' + escapeHtml(label) + '</div>' +
+          '<div class="exec-bar-track"><div class="exec-bar-fill" style="width:' + pct + '%;"></div></div>' +
+          '<div class="exec-bar-value">' + formatFn(r) + '</div>' +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  function renderExecutiveSummary(){
+    const from = state.execFrom || '';
+    const to = state.execTo || '';
+    const data = computeExecutiveData(from, to);
+    const highlights = executiveHighlights(data);
+    const rangeLabel = (from ? fmtDate(from) : 'เริ่มต้น') + ' — ' + (to ? fmtDate(to) : fmtDate(todayStr()));
+
+    const filterBar =
+      '<div class="exec-meta-fields">' +
+        '<div class="field"><label>ชื่อหน่วยงาน/บริษัท (ถ้ามี)</label><input type="text" data-role="exec-org" placeholder="เช่น บริษัท ... จำกัด" value="' + escapeHtml(state.execOrgName || '') + '"/></div>' +
+        '<div class="field"><label>ผู้จัดทำรายงาน (ถ้ามี)</label><input type="text" data-role="exec-prepared-by" placeholder="ชื่อผู้จัดทำ" value="' + escapeHtml(state.execPreparedBy || '') + '"/></div>' +
+      '</div>' +
+      '<div class="report-filter">' +
+        '<div class="field"><label>ตั้งแต่วันที่</label><input type="date" data-role="exec-from" value="' + from + '"/></div>' +
+        '<div class="field"><label>ถึงวันที่</label><input type="date" data-role="exec-to" value="' + to + '"/></div>' +
+        '<button type="button" class="btn" data-action="exec-quick-month">เดือนนี้</button>' +
+        '<button type="button" class="btn" data-action="exec-quick-quarter">ไตรมาสนี้</button>' +
+        '<button type="button" class="btn" data-action="exec-quick-year">ปีนี้</button>' +
+        '<button type="button" class="btn" data-action="exec-clear-filter">ล้างตัวกรอง</button>' +
+      '</div>';
+
+    const summary =
+      '<div class="report-stats">' +
+        '<div class="report-stat-card purple"><div class="rlbl">มูลค่าสต็อกคงเหลือรวม</div><div class="rnum">฿' + fmtMoney(data.reportData.totals.balanceValue) + '</div></div>' +
+        '<div class="report-stat-card mint"><div class="rlbl">มูลค่ารับเข้าในช่วง</div><div class="rnum">฿' + fmtMoney(data.reportData.totals.receivedValue) + '</div></div>' +
+        '<div class="report-stat-card coral"><div class="rlbl">มูลค่าเบิกออกในช่วง</div><div class="rnum">฿' + fmtMoney(data.reportData.totals.issuedValue) + '</div></div>' +
+        '<div class="report-stat-card ' + (data.lowStockItems.length > 0 ? 'warn' : 'blue') + '"><div class="rlbl">รายการใกล้หมดสต็อก</div><div class="rnum">' + data.lowStockItems.length + '</div><div class="rsub">รายการ (ปัจจุบัน)</div></div>' +
+      '</div>';
+
+    const highlightsHtml =
+      '<div class="exec-section">' +
+        '<div class="exec-section-title">ประเด็นสำคัญ</div>' +
+        '<div class="exec-highlight-box"><ul>' + highlights.map(h => '<li>' + escapeHtml(h) + '</li>').join('') + '</ul></div>' +
+      '</div>';
+
+    const topIssuedHtml =
+      '<div class="exec-section">' +
+        '<div class="exec-section-title">วัสดุที่เบิกออกมากที่สุด (Top 5 ตามมูลค่า)</div>' +
+        execBarRowsHTML(data.topIssuedItems, r => r.item.name, r => r.issuedValue, r => '฿' + fmtMoney(r.issuedValue)) +
+      '</div>';
+
+    const topRequestersHtml =
+      '<div class="exec-section">' +
+        '<div class="exec-section-title">ผู้เบิกสูงสุด (Top 5 ตามมูลค่า)</div>' +
+        execBarRowsHTML(data.topRequesters, r => r.label, r => r.totalValue, r => '฿' + fmtMoney(r.totalValue)) +
+      '</div>';
+
+    const lowStockRows = data.lowStockItems.map(i =>
+      '<tr>' +
+        '<td><span class="item-code">' + escapeHtml(i.code || '—') + '</span></td>' +
+        '<td class="item-name">' + escapeHtml(i.name) + '</td>' +
+        '<td class="qty-val" style="color:var(--coral-text);">' + i.qty + ' ' + escapeHtml(i.unit) + '</td>' +
+        '<td class="qty-val">' + i.minQty + '</td>' +
+        '<td><span class="status-pill low">' + (i.qty <= 0 ? 'หมดแล้ว' : 'ใกล้หมด') + '</span></td>' +
+      '</tr>'
+    ).join('');
+    const lowStockHtml =
+      '<div class="exec-section">' +
+        '<div class="exec-section-title">รายการที่ต้องเติมสต็อกด่วน</div>' +
+        (data.lowStockItems.length === 0
+          ? '<div class="empty-state">ไม่มีรายการใกล้หมดในขณะนี้ 🎉</div>'
+          : '<div class="sr-table-wrap"><table class="sr-table"><thead><tr>' +
+              '<th>รหัส</th><th>ชื่อวัสดุ</th><th>คงเหลือ</th><th>ขั้นต่ำ</th><th>สถานะ</th>' +
+            '</tr></thead><tbody>' + lowStockRows + '</tbody></table></div>') +
+      '</div>';
+
+    return (
+      '<div class="sr-panel">' +
+        '<h2 class="panel-title">สรุปผู้บริหาร</h2>' +
+        filterBar +
+        '<div class="toolbar-row" style="margin-top:2px;">' +
+          '<div style="font-size:12.5px;color:var(--ink-light);align-self:center;">ช่วงข้อมูล: ' + rangeLabel + '</div>' +
+          '<div class="export-buttons">' +
+            '<button type="button" class="btn btn-primary" data-action="exec-export-pdf">🖨️ ส่งออก PDF สำหรับผู้บริหาร</button>' +
+          '</div>' +
+        '</div>' +
+        summary +
+        highlightsHtml +
+        topIssuedHtml +
+        topRequestersHtml +
+        lowStockHtml +
+      '</div>'
+    );
+  }
+
+  function exportExecutivePdf(){
+    const from = state.execFrom || '';
+    const to = state.execTo || '';
+    const data = computeExecutiveData(from, to);
+    const highlights = executiveHighlights(data);
+    const rangeLabel = (from ? fmtDate(from) : 'เริ่มต้น') + ' — ' + (to ? fmtDate(to) : fmtDate(todayStr()));
+    const genDate = new Date().toLocaleDateString('th-TH', {year:'numeric', month:'long', day:'numeric'});
+
+    const style =
+      '<style>' +
+        '.exec-letterhead{ text-align:center; border-bottom:3px solid #8E7CF1; padding-bottom:14px; margin-bottom:22px; }' +
+        '.exec-org{ font-size:12px; letter-spacing:1.5px; text-transform:uppercase; color:#8E7CF1; font-weight:700; margin-bottom:6px; }' +
+        '.exec-title{ font-size:22px; margin:0 0 6px; color:#26343A; }' +
+        '.exec-meta{ font-size:12px; color:#777; }' +
+        '.exec-kpi-grid{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:26px; }' +
+        '.exec-kpi{ flex:1; min-width:150px; border:1px solid #E4E1F5; border-radius:12px; padding:14px 16px; background:#FAF9FF; }' +
+        '.exec-kpi-label{ font-size:11px; color:#777; margin-bottom:4px; }' +
+        '.exec-kpi-value{ font-size:19px; font-weight:700; color:#26343A; }' +
+        '.exec-section{ margin-bottom:26px; page-break-inside:avoid; }' +
+        '.exec-section-title{ font-size:14px; color:#8E7CF1; border-left:4px solid #8E7CF1; padding-left:8px; margin:0 0 12px; font-weight:700; }' +
+        '.exec-highlights{ margin:0; padding-left:18px; font-size:13px; line-height:1.8; }' +
+        '.exec-bar-row{ display:flex; align-items:center; gap:10px; margin-bottom:9px; font-size:12.5px; }' +
+        '.exec-bar-label{ width:170px; flex-shrink:0; }' +
+        '.exec-bar-track{ flex:1; background:#F1EEFC; border-radius:6px; height:16px; overflow:hidden; }' +
+        '.exec-bar-fill{ height:100%; background:#8E7CF1; border-radius:6px; }' +
+        '.exec-bar-value{ width:100px; text-align:right; flex-shrink:0; font-weight:700; }' +
+        '.exec-low-badge{ display:inline-block; padding:2px 9px; border-radius:8px; font-size:11px; font-weight:700; background:#FDE2E2; color:#C0392B; }' +
+        '.exec-footer{ text-align:center; font-size:11px; color:#999; margin-top:30px; border-top:1px solid #eee; padding-top:10px; }' +
+      '</style>';
+
+    const kpis = [
+      {label:'มูลค่าสต็อกคงเหลือรวม', value:'฿' + fmtMoney(data.reportData.totals.balanceValue)},
+      {label:'มูลค่ารับเข้าในช่วง', value:'฿' + fmtMoney(data.reportData.totals.receivedValue)},
+      {label:'มูลค่าเบิกออกในช่วง', value:'฿' + fmtMoney(data.reportData.totals.issuedValue)},
+      {label:'รายการใกล้หมดสต็อก', value: data.lowStockItems.length + ' รายการ'}
+    ];
+    const kpiHtml = '<div class="exec-kpi-grid">' + kpis.map(k =>
+      '<div class="exec-kpi"><div class="exec-kpi-label">' + k.label + '</div><div class="exec-kpi-value">' + k.value + '</div></div>'
+    ).join('') + '</div>';
+
+    const highlightsHtml =
+      '<div class="exec-section">' +
+        '<div class="exec-section-title">ประเด็นสำคัญ</div>' +
+        '<ul class="exec-highlights">' + highlights.map(h => '<li>' + escapeHtml(h) + '</li>').join('') + '</ul>' +
+      '</div>';
+
+    function pdfBarRows(rows, labelFn, formatFn, valueFn){
+      if (rows.length === 0) return '<div style="font-size:12.5px;color:#999;">ไม่มีข้อมูลในช่วงนี้</div>';
+      const max = Math.max.apply(null, rows.map(valueFn).concat([1]));
+      return rows.map(r => {
+        const pct = Math.max(4, Math.round((valueFn(r) / max) * 100));
+        return '<div class="exec-bar-row">' +
+          '<div class="exec-bar-label">' + escapeHtml(labelFn(r)) + '</div>' +
+          '<div class="exec-bar-track"><div class="exec-bar-fill" style="width:' + pct + '%;"></div></div>' +
+          '<div class="exec-bar-value">' + formatFn(r) + '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    const topIssuedHtml =
+      '<div class="exec-section">' +
+        '<div class="exec-section-title">วัสดุที่เบิกออกมากที่สุด (Top 5 ตามมูลค่า)</div>' +
+        pdfBarRows(data.topIssuedItems, r => r.item.name, r => '฿' + fmtMoney(r.issuedValue), r => r.issuedValue) +
+      '</div>';
+
+    const topRequestersHtml =
+      '<div class="exec-section">' +
+        '<div class="exec-section-title">ผู้เบิกสูงสุด (Top 5 ตามมูลค่า)</div>' +
+        pdfBarRows(data.topRequesters, r => r.label, r => '฿' + fmtMoney(r.totalValue), r => r.totalValue) +
+      '</div>';
+
+    const lowStockRows = data.lowStockItems.map(i =>
+      '<tr>' +
+        '<td>' + escapeHtml(i.code || '—') + '</td>' +
+        '<td>' + escapeHtml(i.name) + '</td>' +
+        '<td class="num">' + i.qty + ' ' + escapeHtml(i.unit) + '</td>' +
+        '<td class="num">' + i.minQty + '</td>' +
+        '<td><span class="exec-low-badge">' + (i.qty <= 0 ? 'หมดแล้ว' : 'ใกล้หมด') + '</span></td>' +
+      '</tr>'
+    ).join('');
+    const lowStockHtml =
+      '<div class="exec-section">' +
+        '<div class="exec-section-title">รายการที่ต้องเติมสต็อกด่วน</div>' +
+        (data.lowStockItems.length === 0
+          ? '<div style="font-size:12.5px;color:#999;">ไม่มีรายการใกล้หมดในขณะนี้</div>'
+          : '<table><thead><tr><th>รหัส</th><th>ชื่อวัสดุ</th><th class="num">คงเหลือ</th><th class="num">ขั้นต่ำ</th><th>สถานะ</th></tr></thead>' +
+            '<tbody>' + lowStockRows + '</tbody></table>') +
+      '</div>';
+
+    const orgName = (state.execOrgName || '').trim();
+    const preparedBy = (state.execPreparedBy || '').trim();
+    const letterheadHtml =
+      '<div class="exec-letterhead">' +
+        (orgName ? '<div class="exec-org">' + escapeHtml(orgName) + '</div>' : '') +
+        '<h1 class="exec-title">รายงานสรุปสต็อกสินค้าสำหรับผู้บริหาร</h1>' +
+        '<div class="exec-meta">ช่วงข้อมูล: ' + rangeLabel + ' &nbsp;|&nbsp; จัดทำวันที่ ' + genDate +
+          (preparedBy ? ' &nbsp;|&nbsp; จัดทำโดย ' + escapeHtml(preparedBy) : '') +
+        '</div>' +
+      '</div>';
+
+    const footerHtml = '<div class="exec-footer">รายงานนี้สร้างโดยระบบจัดการสต็อกอัตโนมัติ</div>';
+
+    const bodyHtml = style + letterheadHtml + kpiHtml + highlightsHtml + topIssuedHtml + topRequestersHtml + lowStockHtml + footerHtml;
+
+    printReportHtml(bodyHtml);
+  }
+
+
+
   function setTab(tab, presetItem){
     state.tab = tab;
     state.presetItem = presetItem || null;
     state.showAddItem = false;
     state.editingId = null;
+    state.editingTxId = null;
     render();
   }
 
@@ -1088,6 +1451,82 @@
 
   function cancelEdit(){
     state.editingId = null;
+    render();
+  }
+
+  function enterEditTx(id){
+    state.editingTxId = id;
+    render();
+  }
+
+  function cancelTxEdit(){
+    state.editingTxId = null;
+    render();
+  }
+
+  function txTypeOptionsHTML(selected){
+    return (
+      '<option value="in"' + (selected==='in'?' selected':'') + '>รับเข้า</option>' +
+      '<option value="out"' + (selected==='out'?' selected':'') + '>ตัดออก</option>'
+    );
+  }
+
+  function txItemOptionsHTML(selectedId){
+    let html = '';
+    const stillExists = state.items.some(i => i.id === selectedId);
+    if (!stillExists) {
+      html += '<option value="' + escapeHtml(selectedId || '') + '" selected disabled>(ถูกลบแล้ว)</option>';
+    }
+    html += state.items.map(i =>
+      '<option value="' + i.id + '"' + (i.id===selectedId?' selected':'') + '>' + escapeHtml(i.name) + ' [' + escapeHtml(i.code||'—') + ']</option>'
+    ).join('');
+    return html;
+  }
+
+  async function saveTxEdit(id){
+    const row = document.querySelector('[data-edit-tx-row="' + id + '"]');
+    const tx = state.transactions.find(t => t.id === id);
+    if (!row || !tx) return;
+    const get = (f) => { const el = row.querySelector('[data-field="' + f + '"]'); return el ? el.value : ''; };
+
+    const newItemId = get('itemId');
+    const newType = get('type');
+    const newQty = Math.max(0, Math.round(Number(get('qty')) || 0));
+    const newDate = get('date') || todayStr();
+    const newNote = (get('note') || '').trim();
+    const newRequester = (get('requester') || '').trim();
+
+    if (!newItemId || !itemById(newItemId)) { showToast('กรุณาเลือกรายการวัสดุ', 'warn'); return; }
+    if (!newQty || newQty <= 0) { showToast('กรุณากรอกจำนวนให้ถูกต้อง', 'warn'); return; }
+    if (newType === 'out' && !newRequester) { showToast('กรุณากรอกชื่อคนเบิก', 'warn'); return; }
+
+    const oldItem = itemById(tx.itemId);
+    if (oldItem) oldItem.qty += (tx.type === 'in' ? -tx.qty : tx.qty);
+
+    const newItem = itemById(newItemId);
+    if (newType === 'out' && newQty > newItem.qty) {
+      if (oldItem) oldItem.qty += (tx.type === 'in' ? tx.qty : -tx.qty);
+      showToast('จำนวนคงเหลือไม่พอสำหรับตัดออก', 'warn');
+      return;
+    }
+    newItem.qty += (newType === 'in' ? newQty : -newQty);
+    if (newItem.qty < 0) newItem.qty = 0;
+
+    tx.itemId = newItemId;
+    tx.type = newType;
+    tx.qty = newQty;
+    tx.date = newDate;
+    tx.note = newNote;
+    tx.requester = newType === 'out' ? newRequester : '';
+
+    if (newType === 'out' && newRequester) {
+      const exists = state.requesters.some(r => r.name.toLowerCase() === newRequester.toLowerCase());
+      if (!exists) state.requesters.push({id: uid('req'), name: newRequester});
+    }
+
+    state.editingTxId = null;
+    try { await saveData(); showToast('บันทึกการแก้ไขแล้ว'); }
+    catch(e){ showToast('บันทึกไม่สำเร็จ', 'warn'); }
     render();
   }
 
@@ -1143,6 +1582,7 @@
       ['history','ประวัติรายการ'],
       ['byRequester','สรุปการเบิกรายคน'],
       ['report','แดชบอร์ดรายงาน'],
+      ['executive','สรุปผู้บริหาร'],
     ];
     return '<div class="sr-tabs">' + tabs.map(([k,label]) =>
       '<button class="sr-tab ' + (state.tab===k?'active':'') + '" data-tab="' + k + '">' + label + '</button>'
@@ -1371,7 +1811,13 @@
               '</div>' +
             '</div>' +
             '<div class="field"><label>จำนวน</label><input name="qty" type="number" min="1" required placeholder="0"/></div>' +
-            (isIn ? '' : '<div class="field"><label>คนเบิก</label><input name="requester" required placeholder="ชื่อผู้เบิก / แผนก"/></div>') +
+            (isIn ? '' : '<div class="field"><label>คนเบิก</label>' +
+              '<div class="combo-wrap">' +
+                '<input type="text" name="requester" class="combo-input-clearable" data-role="requester-search" autocomplete="off" required placeholder="ชื่อผู้เบิก / แผนก"/>' +
+                '<button type="button" class="search-clear-btn" data-role="requester-clear-btn" title="ล้างคำค้นหา" style="display:none;">✕</button>' +
+                '<div class="combo-results" data-role="requester-results" hidden></div>' +
+              '</div>' +
+            '</div>') +
             '<div class="field"><label>วันที่</label><input name="date" type="date" value="' + todayStr() + '"/></div>' +
             '<div class="field"><label>หมายเหตุ</label><input name="note" placeholder="' + (isIn?'เช่น ซื้อเข้าคลัง':'เช่น เบิกใช้แผนกบัญชี') + '"/></div>' +
             '<button type="submit" class="btn btn-primary btn-block">' + (isIn?'บันทึกรับเข้า':'บันทึกตัดออก') + '</button>' +
@@ -1419,22 +1865,45 @@
     );
   }
 
+  function historyEditRowHTML(t){
+    return (
+      '<tr data-edit-tx-row="' + t.id + '">' +
+        '<td><input class="edit-input" type="date" data-field="date" value="' + escapeHtml(t.date) + '"/></td>' +
+        '<td><select class="edit-input" data-field="type">' + txTypeOptionsHTML(t.type) + '</select></td>' +
+        '<td colspan="2"><select class="edit-input" data-field="itemId">' + txItemOptionsHTML(t.itemId) + '</select></td>' +
+        '<td><input class="edit-input num" type="number" min="1" data-field="qty" value="' + t.qty + '"/></td>' +
+        '<td><input class="edit-input" data-field="requester" placeholder="ชื่อผู้เบิก (ถ้ามี)" value="' + escapeHtml(t.requester || '') + '"/></td>' +
+        '<td><input class="edit-input" data-field="note" value="' + escapeHtml(t.note || '') + '"/></td>' +
+        '<td><div class="row-actions">' +
+          '<button class="icon-btn in" data-action="save-tx" data-id="' + t.id + '">บันทึก</button>' +
+          '<button class="icon-btn del" data-action="cancel-tx-edit">ยกเลิก</button>' +
+        '</div></td>' +
+      '</tr>'
+    );
+  }
+
   function historyRowsHTML(rows){
     if (rows.length === 0) {
       return '<tr><td colspan="8"><div class="empty-state">ไม่พบรายการที่ตรงกับเงื่อนไข</div></td></tr>';
     }
-    return rows.map(t =>
-      '<tr>' +
-        '<td>' + fmtDate(t.date) + '</td>' +
-        '<td><span class="chip ' + t.type + '">' + (t.type==='in'?'รับเข้า':'ตัดออก') + '</span></td>' +
-        '<td><span class="item-code">' + escapeHtml(itemCode(t.itemId)) + '</span></td>' +
-        '<td class="item-name">' + escapeHtml(itemName(t.itemId)) + '</td>' +
-        '<td class="qty-val" style="color:' + (t.type==='in'?'var(--mint-text)':'var(--coral-text)') + ';">' + (t.type==='in'?'+':'-') + t.qty + ' ' + escapeHtml(itemUnit(t.itemId)) + '</td>' +
-        '<td class="note-cell">' + escapeHtml(t.requester || '—') + '</td>' +
-        '<td class="note-cell">' + escapeHtml(t.note || '—') + '</td>' +
-        '<td><button class="icon-btn del" data-action="delete-tx" data-id="' + t.id + '" title="ลบรายการ">ลบ</button></td>' +
-      '</tr>'
-    ).join('');
+    return rows.map(t => {
+      if (state.editingTxId === t.id) return historyEditRowHTML(t);
+      return (
+        '<tr>' +
+          '<td>' + fmtDate(t.date) + '</td>' +
+          '<td><span class="chip ' + t.type + '">' + (t.type==='in'?'รับเข้า':'ตัดออก') + '</span></td>' +
+          '<td><span class="item-code">' + escapeHtml(itemCode(t.itemId)) + '</span></td>' +
+          '<td class="item-name">' + escapeHtml(itemName(t.itemId)) + '</td>' +
+          '<td class="qty-val" style="color:' + (t.type==='in'?'var(--mint-text)':'var(--coral-text)') + ';">' + (t.type==='in'?'+':'-') + t.qty + ' ' + escapeHtml(itemUnit(t.itemId)) + '</td>' +
+          '<td class="note-cell">' + escapeHtml(t.requester || '—') + '</td>' +
+          '<td class="note-cell">' + escapeHtml(t.note || '—') + '</td>' +
+          '<td><div class="row-actions">' +
+            '<button class="icon-btn edit" data-action="edit-tx" data-id="' + t.id + '" title="แก้ไขรายการ">แก้ไข</button>' +
+            '<button class="icon-btn del" data-action="delete-tx" data-id="' + t.id + '" title="ลบรายการ">ลบ</button>' +
+          '</div></td>' +
+        '</tr>'
+      );
+    }).join('');
   }
 
   function renderHistory(){
@@ -1482,6 +1951,7 @@
     else if (state.tab === 'history') panel = renderHistory();
     else if (state.tab === 'byRequester') panel = renderRequesterSummary();
     else if (state.tab === 'report') panel = renderReport();
+    else if (state.tab === 'executive') panel = renderExecutiveSummary();
 
     app.innerHTML =
       '<div class="sr-shell">' +
@@ -1522,6 +1992,123 @@
     ).join('');
   }
 
+  function comboRequesterOptionsHTML(query, editingId){
+    const qRaw = (query || '').trim();
+    const q = qRaw.toLowerCase();
+    const filtered = !q ? state.requesters.slice() : state.requesters.filter(r => r.name.toLowerCase().includes(q));
+    const exactMatch = qRaw && state.requesters.some(r => r.name.toLowerCase() === q);
+
+    let html = '';
+    if (qRaw && !exactMatch) {
+      html += '<div class="combo-option combo-add" data-action="add-requester" data-name="' + escapeHtml(qRaw) + '">' +
+        '<span class="combo-name">+ เพิ่ม "' + escapeHtml(qRaw) + '" เป็นชื่อใหม่</span>' +
+      '</div>';
+    }
+    if (filtered.length === 0 && !qRaw) {
+      html += '<div class="combo-empty">ยังไม่มีรายชื่อคนเบิก พิมพ์ชื่อเพื่อเพิ่มใหม่</div>';
+    } else {
+      html += filtered.map(r => {
+        if (editingId === r.id) {
+          return '<div class="combo-option combo-option-edit" data-id="' + r.id + '">' +
+            '<input type="text" class="combo-edit-input" data-role="requester-edit-input" value="' + escapeHtml(r.name) + '"/>' +
+            '<button type="button" class="icon-btn in" data-action="save-requester-name" data-id="' + r.id + '">บันทึก</button>' +
+            '<button type="button" class="icon-btn del" data-action="cancel-requester-edit">ยกเลิก</button>' +
+          '</div>';
+        }
+        return '<div class="combo-option" data-id="' + r.id + '" data-name="' + escapeHtml(r.name) + '">' +
+          '<span class="combo-name">' + escapeHtml(r.name) + '</span>' +
+          '<button type="button" class="combo-edit-btn" data-action="edit-requester-name" data-id="' + r.id + '" title="แก้ไขชื่อ">✎</button>' +
+        '</div>';
+      }).join('');
+    }
+    return html;
+  }
+
+  function setupRequesterCombobox(form){
+    const input = form.querySelector('[data-role="requester-search"]');
+    const results = form.querySelector('[data-role="requester-results"]');
+    const clearBtn = form.querySelector('[data-role="requester-clear-btn"]');
+    if (!input || !results) return;
+
+    let editingId = null;
+
+    function syncClear(){ if (clearBtn) clearBtn.style.display = input.value ? 'flex' : 'none'; }
+    function open(query){ results.innerHTML = comboRequesterOptionsHTML(query, editingId); results.hidden = false; }
+    function close(){ results.hidden = true; }
+
+    input.addEventListener('focus', () => open(input.value));
+    input.addEventListener('click', () => open(input.value));
+    input.addEventListener('input', () => { editingId = null; syncClear(); open(input.value); });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Escape'){ close(); input.blur(); } });
+    input.addEventListener('blur', () => { setTimeout(close, 150); });
+    syncClear();
+
+    if (clearBtn) {
+      clearBtn.addEventListener('mousedown', (e) => e.preventDefault());
+      clearBtn.addEventListener('click', () => {
+        input.value = '';
+        syncClear();
+        open('');
+        input.focus();
+      });
+    }
+
+    results.addEventListener('mousedown', async (e) => {
+      const addOpt = e.target.closest('[data-action="add-requester"]');
+      const editBtn = e.target.closest('[data-action="edit-requester-name"]');
+      const saveBtn = e.target.closest('[data-action="save-requester-name"]');
+      const cancelBtn = e.target.closest('[data-action="cancel-requester-edit"]');
+      const opt = e.target.closest('.combo-option:not(.combo-option-edit):not(.combo-add)');
+
+      if (addOpt) {
+        e.preventDefault();
+        const name = addOpt.getAttribute('data-name');
+        const req = await addRequesterName(name);
+        if (req) input.value = req.name;
+        editingId = null;
+        close();
+        syncClear();
+        return;
+      }
+      if (editBtn) {
+        e.preventDefault();
+        editingId = editBtn.getAttribute('data-id');
+        open(input.value);
+        const editInput = results.querySelector('[data-role="requester-edit-input"]');
+        if (editInput) { editInput.focus(); editInput.select(); }
+        return;
+      }
+      if (saveBtn) {
+        e.preventDefault();
+        const id = saveBtn.getAttribute('data-id');
+        const editInput = results.querySelector('[data-role="requester-edit-input"]');
+        const newName = editInput ? editInput.value : '';
+        const oldReq = state.requesters.find(r => r.id === id);
+        const wasSelected = oldReq && input.value.trim().toLowerCase() === oldReq.name.toLowerCase();
+        const ok = await renameRequester(id, newName);
+        if (ok && wasSelected) {
+          const updated = state.requesters.find(r => r.id === id);
+          if (updated) input.value = updated.name;
+        }
+        editingId = null;
+        open(input.value);
+        return;
+      }
+      if (cancelBtn) {
+        e.preventDefault();
+        editingId = null;
+        open(input.value);
+        return;
+      }
+      if (opt) {
+        e.preventDefault();
+        input.value = opt.getAttribute('data-name');
+        close();
+        syncClear();
+      }
+    });
+  }
+
   function setupCombobox(form){
     const input = form.querySelector('[data-role="item-search"]');
     const hidden = form.querySelector('[data-role="item-id-hidden"]');
@@ -1553,6 +2140,15 @@
   function wireHistoryRows(root){
     root.querySelectorAll('[data-action="delete-tx"]').forEach(btn => {
       btn.addEventListener('click', () => deleteTransaction(btn.getAttribute('data-id')));
+    });
+    root.querySelectorAll('[data-action="edit-tx"]').forEach(btn => {
+      btn.addEventListener('click', () => enterEditTx(btn.getAttribute('data-id')));
+    });
+    root.querySelectorAll('[data-action="save-tx"]').forEach(btn => {
+      btn.addEventListener('click', () => saveTxEdit(btn.getAttribute('data-id')));
+    });
+    root.querySelectorAll('[data-action="cancel-tx-edit"]').forEach(btn => {
+      btn.addEventListener('click', cancelTxEdit);
     });
   }
 
@@ -1673,6 +2269,7 @@
     const moveForm = app.querySelector('[data-form="move"]');
     if (moveForm) {
       setupCombobox(moveForm);
+      setupRequesterCombobox(moveForm);
       moveForm.addEventListener('submit', (e) => {
         e.preventDefault();
         const fd = new FormData(moveForm);
@@ -1760,6 +2357,33 @@
         }
       });
     }
+
+    const execOrgInput = app.querySelector('[data-role="exec-org"]');
+    if (execOrgInput) execOrgInput.addEventListener('input', () => { state.execOrgName = execOrgInput.value; });
+    const execPreparedByInput = app.querySelector('[data-role="exec-prepared-by"]');
+    if (execPreparedByInput) execPreparedByInput.addEventListener('input', () => { state.execPreparedBy = execPreparedByInput.value; });
+    const execFromInput = app.querySelector('[data-role="exec-from"]');
+    if (execFromInput) execFromInput.addEventListener('change', () => { state.execFrom = execFromInput.value; render(); });
+    const execToInput = app.querySelector('[data-role="exec-to"]');
+    if (execToInput) execToInput.addEventListener('change', () => { state.execTo = execToInput.value; render(); });
+    const execQuickMonth = app.querySelector('[data-action="exec-quick-month"]');
+    if (execQuickMonth) execQuickMonth.addEventListener('click', () => {
+      state.execFrom = firstDayOfMonthStr(); state.execTo = todayStr(); render();
+    });
+    const execQuickQuarter = app.querySelector('[data-action="exec-quick-quarter"]');
+    if (execQuickQuarter) execQuickQuarter.addEventListener('click', () => {
+      state.execFrom = firstDayOfQuarterStr(); state.execTo = todayStr(); render();
+    });
+    const execQuickYear = app.querySelector('[data-action="exec-quick-year"]');
+    if (execQuickYear) execQuickYear.addEventListener('click', () => {
+      state.execFrom = firstDayOfYearStr(); state.execTo = todayStr(); render();
+    });
+    const execClearFilter = app.querySelector('[data-action="exec-clear-filter"]');
+    if (execClearFilter) execClearFilter.addEventListener('click', () => {
+      state.execFrom = ''; state.execTo = ''; render();
+    });
+    const execExportPdfBtn = app.querySelector('[data-action="exec-export-pdf"]');
+    if (execExportPdfBtn) execExportPdfBtn.addEventListener('click', exportExecutivePdf);
 
     const resetBtn = app.querySelector('[data-action="reset-all"]');
     if (resetBtn) resetBtn.addEventListener('click', resetAll);
