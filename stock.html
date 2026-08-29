@@ -1192,7 +1192,8 @@
       .sort((a, b) => (a.qty - a.minQty) - (b.qty - b.minQty));
     const topRequesters = requesterData.list.slice(0, 5);
     const netValue = reportData.totals.receivedValue - reportData.totals.issuedValue;
-    return { reportData, requesterData, topIssuedItems, topReceivedItems, lowStockItems, topRequesters, netValue };
+    const currentBalanceValue = state.items.reduce((s, i) => s + i.qty * (i.price || 0), 0);
+    return { reportData, requesterData, topIssuedItems, topReceivedItems, lowStockItems, topRequesters, netValue, currentBalanceValue };
   }
 
   function executiveHighlights(data){
@@ -1263,7 +1264,7 @@
 
     const summary =
       '<div class="report-stats">' +
-        '<div class="report-stat-card purple"><div class="rlbl">มูลค่าสต็อกคงเหลือรวม</div><div class="rnum">฿' + fmtMoney(data.reportData.totals.balanceValue) + '</div></div>' +
+        '<div class="report-stat-card purple"><div class="rlbl">มูลค่าสต็อกคงเหลือรวม</div><div class="rnum">฿' + fmtMoney(data.currentBalanceValue) + '</div></div>' +
         '<div class="report-stat-card mint"><div class="rlbl">มูลค่ารับเข้าในช่วง</div><div class="rnum">฿' + fmtMoney(data.reportData.totals.receivedValue) + '</div></div>' +
         '<div class="report-stat-card coral"><div class="rlbl">มูลค่าเบิกออกในช่วง</div><div class="rnum">฿' + fmtMoney(data.reportData.totals.issuedValue) + '</div></div>' +
         '<div class="report-stat-card ' + (data.lowStockItems.length > 0 ? 'warn' : 'blue') + '"><div class="rlbl">รายการใกล้หมดสต็อก</div><div class="rnum">' + data.lowStockItems.length + '</div><div class="rsub">รายการ (ปัจจุบัน)</div></div>' +
@@ -1356,7 +1357,7 @@
       '</style>';
 
     const kpis = [
-      {label:'มูลค่าสต็อกคงเหลือรวม', value:'฿' + fmtMoney(data.reportData.totals.balanceValue)},
+      {label:'มูลค่าสต็อกคงเหลือรวม', value:'฿' + fmtMoney(data.currentBalanceValue)},
       {label:'มูลค่ารับเข้าในช่วง', value:'฿' + fmtMoney(data.reportData.totals.receivedValue)},
       {label:'มูลค่าเบิกออกในช่วง', value:'฿' + fmtMoney(data.reportData.totals.issuedValue)},
       {label:'รายการใกล้หมดสต็อก', value: data.lowStockItems.length + ' รายการ'}
