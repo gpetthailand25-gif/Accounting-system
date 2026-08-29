@@ -539,10 +539,10 @@ function dashboardHtml(){
     { key: 'value', label: 'มูลค่า' },
     { key: 'note', label: 'หมายเหตุ' },
   ];
-  const theadRowHtml = `<tr id="listTheadRow" style="position:sticky;z-index:90;"><th style="position:sticky;left:0;background:#fff;"></th>${sortCols.map(c => {
+  const theadRowHtml = `<tr id="listTheadRow"><th style="position:sticky;z-index:90;background:#fff;"></th>${sortCols.map(c => {
     const active = sortKey === c.key;
     const arrow = active ? (sortDir === 'desc' ? ' ▼' : ' ▲') : '';
-    return `<th data-sort-key="${c.key}" data-default-dir="${c.defaultDir || 'asc'}" style="cursor:pointer;user-select:none;white-space:nowrap;position:sticky;background:#fff;">${escapeHtml(c.label)}${arrow}</th>`;
+    return `<th data-sort-key="${c.key}" data-default-dir="${c.defaultDir || 'asc'}" style="cursor:pointer;user-select:none;white-space:nowrap;position:sticky;z-index:90;background:#fff;">${escapeHtml(c.label)}${arrow}</th>`;
   }).join('')}</tr>`;
 
   const rows = shown.map(i => `
