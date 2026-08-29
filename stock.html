@@ -154,12 +154,29 @@
     display: flex; justify-content: space-between; align-items: center; gap: 12px;
     flex-wrap: wrap; margin-bottom: 14px;
   }
-  .search-wrap { flex: 1; min-width: 220px; }
+  .search-wrap { flex: 1; min-width: 220px; position: relative; }
   .search-wrap input {
     width: 100%; border: 1.5px solid var(--line); border-radius: 12px;
-    padding: 10px 14px; font-size: 13.5px; background: var(--surface-soft); color: var(--ink);
+    padding: 10px 34px 10px 14px; font-size: 13.5px; background: var(--surface-soft); color: var(--ink);
   }
   .search-wrap input:focus { outline: none; border-color: var(--purple); }
+  .search-clear-btn {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    width: 22px; height: 22px; border: none; border-radius: 50%;
+    background: var(--line); color: var(--ink-light); font-size: 12px; line-height: 1;
+    display: flex; align-items: center; justify-content: center; padding: 0;
+  }
+  .search-clear-btn:hover { background: var(--coral); color: #fff; }
+  .history-filters { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .history-filters .field { margin-bottom: 0; }
+  .history-filters .field input { min-width: 150px; }
+  .requester-card { background: var(--surface-soft); border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+  .requester-card-head {
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
+    gap: 8px; margin-bottom: 12px;
+  }
+  .requester-name { font-family: var(--font-display); font-weight: 700; font-size: 15px; color: var(--purple-text); }
+  .requester-totals { font-size: 12.5px; color: var(--ink-light); font-weight: 600; }
   table.sr-table thead th.sortable { cursor: pointer; user-select: none; }
   table.sr-table thead th.sortable:hover { color: var(--purple-text); }
   table.sr-table thead th.sortable.active { color: var(--purple-text); }
@@ -369,6 +386,12 @@
     sortDir: 'asc',
     reportFrom: firstDayOfMonthStr(),
     reportTo: todayStr(),
+    historySearch: '',
+    historyFrom: '',
+    historyTo: '',
+    reqFrom: firstDayOfMonthStr(),
+    reqTo: todayStr(),
+    reqSearch: '',
     editingId: null,
     configured: false,
     showImport: false,
@@ -753,6 +776,10 @@
     return { perItem, totals, lowCount, asOfDate };
   }
 
+  function reportRowsForDisplay(perItem){
+    return perItem.filter(r => r.receivedQty !== 0 || r.issuedQty !== 0 || r.balanceQty !== 0);
+  }
+
   function renderReport(){
     const from = state.reportFrom || '';
     const to = state.reportTo || '';
@@ -775,7 +802,8 @@
         '<div class="report-stat-card ' + (data.lowCount > 0 ? 'warn' : 'blue') + '"><div class="rlbl">รายการใกล้หมด ณ วันนั้น</div><div class="rnum">' + data.lowCount + '</div><div class="rsub">รายการ</div></div>' +
       '</div>';
 
-    const rows = data.perItem.map(r =>
+    const visibleRows = reportRowsForDisplay(data.perItem);
+    const rows = visibleRows.map(r =>
       '<tr>' +
         '<td><span class="item-code">' + escapeHtml(r.item.code || '—') + '</span></td>' +
         '<td class="item-name">' + escapeHtml(r.item.name) + '</td>' +
@@ -788,9 +816,11 @@
 
     const table = state.items.length === 0
       ? '<div class="empty-state">ยังไม่มีรายการวัสดุในคลัง</div>'
-      : '<div class="sr-table-wrap"><table class="sr-table"><thead><tr>' +
+      : (visibleRows.length === 0
+        ? '<div class="empty-state">ไม่มีรายการที่มีความเคลื่อนไหวหรือยอดคงเหลือในช่วงนี้</div>'
+        : '<div class="sr-table-wrap"><table class="sr-table"><thead><tr>' +
           '<th>รหัส</th><th>ชื่อวัสดุ</th><th>รับเข้าในช่วง</th><th>เบิกออกในช่วง</th><th>คงเหลือ ณ วันที่</th><th>มูลค่าคงเหลือ</th>' +
-        '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+        '</tr></thead><tbody>' + rows + '</tbody></table></div>');
 
     return '<div class="sr-panel">' +
       '<h2 class="panel-title">แดชบอร์ดรายงาน</h2>' +
@@ -808,12 +838,13 @@
 
   async function exportReportExcel(){
     const data = computeReportData(state.reportFrom, state.reportTo);
-    if (data.perItem.length === 0) { showToast('ไม่มีข้อมูลให้ส่งออก', 'warn'); return; }
+    const visibleRows = reportRowsForDisplay(data.perItem);
+    if (visibleRows.length === 0) { showToast('ไม่มีข้อมูลให้ส่งออก', 'warn'); return; }
     try {
       await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
     } catch(e){ showToast('โหลดไลบรารี Excel ไม่สำเร็จ ตรวจสอบอินเทอร์เน็ต', 'warn'); return; }
     try {
-      const rows = data.perItem.map(r => ({
+      const rows = visibleRows.map(r => ({
         'รหัส': r.item.code || '',
         'ชื่อวัสดุ': r.item.name,
         'รับเข้า (จำนวน)': r.receivedQty,
@@ -834,10 +865,11 @@
 
   function exportReportPdf(){
     const data = computeReportData(state.reportFrom, state.reportTo);
-    if (data.perItem.length === 0) { showToast('ไม่มีข้อมูลให้ส่งออก', 'warn'); return; }
+    const visibleRows = reportRowsForDisplay(data.perItem);
+    if (visibleRows.length === 0) { showToast('ไม่มีข้อมูลให้ส่งออก', 'warn'); return; }
 
     const rangeLabel = (state.reportFrom ? fmtDate(state.reportFrom) : 'เริ่มต้น') + ' — ' + (state.reportTo ? fmtDate(state.reportTo) : fmtDate(todayStr()));
-    const rowsHtml = data.perItem.map(r =>
+    const rowsHtml = visibleRows.map(r =>
       '<tr>' +
         '<td>' + escapeHtml(r.item.code || '-') + '</td>' +
         '<td>' + escapeHtml(r.item.name) + '</td>' +
@@ -860,6 +892,180 @@
       '<table><thead><tr><th>รหัส</th><th>ชื่อวัสดุ</th><th class="num">รับเข้า</th><th class="num">เบิกออก</th>' +
       '<th class="num">คงเหลือ</th><th class="num">มูลค่าคงเหลือ</th></tr></thead>' +
       '<tbody>' + rowsHtml + '</tbody></table>';
+
+    printReportHtml(bodyHtml);
+  }
+
+
+
+  // ---------- requester summary ----------
+
+  function computeRequesterData(from, to, search){
+    const q = (search || '').trim().toLowerCase();
+    const groups = {};
+    state.transactions.forEach(t => {
+      if (t.type !== 'out') return;
+      if (!inRange(t.date, from, to)) return;
+      const name = (t.requester || '').trim() || 'ไม่ระบุ';
+      const key = name.toLowerCase();
+      if (q && !key.includes(q)) return;
+      if (!groups[key]) groups[key] = { label: name, items: {}, totalQty: 0, totalValue: 0 };
+      const g = groups[key];
+      const it = itemById(t.itemId);
+      const price = it ? (it.price || 0) : 0;
+      const value = t.qty * price;
+      if (!g.items[t.itemId]) g.items[t.itemId] = { itemId: t.itemId, qty: 0, value: 0 };
+      g.items[t.itemId].qty += t.qty;
+      g.items[t.itemId].value += value;
+      g.totalQty += t.qty;
+      g.totalValue += value;
+    });
+    const list = Object.keys(groups).map(key => {
+      const g = groups[key];
+      return {
+        label: g.label,
+        totalQty: g.totalQty,
+        totalValue: g.totalValue,
+        items: Object.values(g.items).sort((a, b) => b.value - a.value)
+      };
+    }).sort((a, b) => b.totalValue - a.totalValue);
+    const totals = list.reduce((acc, g) => {
+      acc.qty += g.totalQty; acc.value += g.totalValue; return acc;
+    }, { qty: 0, value: 0 });
+    return { list, totals, requesterCount: list.length };
+  }
+
+  function requesterFilterBarHTML(){
+    const from = state.reqFrom || '';
+    const to = state.reqTo || '';
+    return (
+      '<div class="report-filter">' +
+        '<div class="field"><label>ตั้งแต่วันที่</label><input type="date" data-role="req-from" value="' + from + '"/></div>' +
+        '<div class="field"><label>ถึงวันที่</label><input type="date" data-role="req-to" value="' + to + '"/></div>' +
+        '<div class="field"><label>ค้นหาคนเบิก</label><input type="text" data-role="req-search" autocomplete="off" ' +
+          'placeholder="ชื่อคนเบิก..." value="' + escapeHtml(state.reqSearch || '') + '"/></div>' +
+        '<button type="button" class="btn" data-action="req-quick-month">เดือนนี้</button>' +
+        '<button type="button" class="btn" data-action="req-quick-7d">7 วันล่าสุด</button>' +
+        '<button type="button" class="btn" data-action="req-clear-filter">ล้างตัวกรอง</button>' +
+      '</div>'
+    );
+  }
+
+  function requesterBodyHTML(data){
+    const summary =
+      '<div class="report-stats">' +
+        '<div class="report-stat-card purple"><div class="rlbl">จำนวนคนเบิก</div><div class="rnum">' + data.requesterCount + '</div><div class="rsub">คน</div></div>' +
+        '<div class="report-stat-card coral"><div class="rlbl">เบิกออกรวม</div><div class="rnum">' + data.totals.qty + '</div><div class="rsub">ชิ้น</div></div>' +
+        '<div class="report-stat-card mint"><div class="rlbl">มูลค่ารวม</div><div class="rnum">฿' + fmtMoney(data.totals.value) + '</div></div>' +
+      '</div>';
+
+    const toolbar =
+      '<div class="toolbar-row" style="margin-top:2px;">' +
+        '<div></div>' +
+        '<div class="export-buttons">' +
+          '<button type="button" class="btn" data-action="req-export-excel">📊 ส่งออก Excel</button>' +
+          '<button type="button" class="btn" data-action="req-export-pdf">🖨️ ส่งออก PDF</button>' +
+        '</div>' +
+      '</div>';
+
+    const cards = data.list.length === 0
+      ? '<div class="empty-state">ไม่พบรายการเบิกในช่วงหรือเงื่อนไขที่เลือก</div>'
+      : data.list.map(g => {
+          const rows = g.items.map(it =>
+            '<tr>' +
+              '<td><span class="item-code">' + escapeHtml(itemCode(it.itemId)) + '</span></td>' +
+              '<td class="item-name">' + escapeHtml(itemName(it.itemId)) + '</td>' +
+              '<td class="qty-val">' + it.qty + ' ' + escapeHtml(itemUnit(it.itemId)) + '</td>' +
+              '<td class="value-val">฿' + fmtMoney(it.value) + '</td>' +
+            '</tr>'
+          ).join('');
+          return (
+            '<div class="requester-card">' +
+              '<div class="requester-card-head">' +
+                '<div class="requester-name">' + escapeHtml(g.label) + '</div>' +
+                '<div class="requester-totals">เบิกไป ' + g.totalQty + ' ชิ้น · มูลค่า ฿' + fmtMoney(g.totalValue) + '</div>' +
+              '</div>' +
+              '<div class="sr-table-wrap"><table class="sr-table"><thead><tr>' +
+                '<th>รหัส</th><th>ชื่อวัสดุ</th><th>จำนวนที่เบิก</th><th>มูลค่า</th>' +
+              '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+            '</div>'
+          );
+        }).join('');
+
+    return summary + toolbar + cards;
+  }
+
+  function renderRequesterSummary(){
+    const data = computeRequesterData(state.reqFrom, state.reqTo, state.reqSearch);
+    return (
+      '<div class="sr-panel">' +
+        '<h2 class="panel-title">สรุปการเบิกรายคน</h2>' +
+        requesterFilterBarHTML() +
+        '<div data-role="requester-body">' + requesterBodyHTML(data) + '</div>' +
+      '</div>'
+    );
+  }
+
+  async function exportRequesterExcel(){
+    const data = computeRequesterData(state.reqFrom, state.reqTo, state.reqSearch);
+    if (data.list.length === 0) { showToast('ไม่มีข้อมูลให้ส่งออก', 'warn'); return; }
+    try {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+    } catch(e){ showToast('โหลดไลบรารี Excel ไม่สำเร็จ ตรวจสอบอินเทอร์เน็ต', 'warn'); return; }
+    try {
+      const rows = [];
+      data.list.forEach(g => {
+        g.items.forEach(it => {
+          rows.push({
+            'คนเบิก': g.label,
+            'รหัส': itemCode(it.itemId) === '—' ? '' : itemCode(it.itemId),
+            'ชื่อวัสดุ': itemName(it.itemId),
+            'จำนวนที่เบิก': it.qty,
+            'มูลค่า': it.value
+          });
+        });
+        rows.push({ 'คนเบิก': g.label + ' (รวม)', 'รหัส': '', 'ชื่อวัสดุ': '', 'จำนวนที่เบิก': g.totalQty, 'มูลค่า': g.totalValue });
+      });
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = [{wch:18},{wch:10},{wch:28},{wch:14},{wch:14}];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'สรุปการเบิก');
+      const fname = 'requester-summary-' + (state.reqFrom || 'start') + '_to_' + (state.reqTo || todayStr()) + '.xlsx';
+      XLSX.writeFile(wb, fname);
+      showToast('ส่งออก Excel แล้ว');
+    } catch(e){ showToast('ส่งออก Excel ไม่สำเร็จ', 'warn'); }
+  }
+
+  function exportRequesterPdf(){
+    const data = computeRequesterData(state.reqFrom, state.reqTo, state.reqSearch);
+    if (data.list.length === 0) { showToast('ไม่มีข้อมูลให้ส่งออก', 'warn'); return; }
+
+    const rangeLabel = (state.reqFrom ? fmtDate(state.reqFrom) : 'เริ่มต้น') + ' — ' + (state.reqTo ? fmtDate(state.reqTo) : fmtDate(todayStr()));
+    const sectionsHtml = data.list.map(g => {
+      const rowsHtml = g.items.map(it =>
+        '<tr>' +
+          '<td>' + escapeHtml(itemCode(it.itemId)) + '</td>' +
+          '<td>' + escapeHtml(itemName(it.itemId)) + '</td>' +
+          '<td class="num">' + it.qty + '</td>' +
+          '<td class="num">' + fmtMoney(it.value) + '</td>' +
+        '</tr>'
+      ).join('');
+      return (
+        '<h2 style="font-size:14px;margin:18px 0 6px;">' + escapeHtml(g.label) + ' — รวม ' + g.totalQty + ' ชิ้น (฿' + fmtMoney(g.totalValue) + ')</h2>' +
+        '<table><thead><tr><th>รหัส</th><th>ชื่อวัสดุ</th><th class="num">จำนวน</th><th class="num">มูลค่า</th></tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody></table>'
+      );
+    }).join('');
+
+    const bodyHtml =
+      '<h1>สรุปการเบิกวัสดุรายคน</h1>' +
+      '<div class="meta">ช่วงวันที่: ' + rangeLabel + '</div>' +
+      '<div class="stat-row">' +
+        '<div class="stat-box"><div class="l">จำนวนคนเบิก</div><div class="v">' + data.requesterCount + ' คน</div></div>' +
+        '<div class="stat-box"><div class="l">เบิกออกรวม</div><div class="v">' + data.totals.qty + ' ชิ้น</div></div>' +
+        '<div class="stat-box"><div class="l">มูลค่ารวม</div><div class="v">฿' + fmtMoney(data.totals.value) + '</div></div>' +
+      '</div>' +
+      sectionsHtml;
 
     printReportHtml(bodyHtml);
   }
@@ -935,6 +1141,7 @@
       ['receive','รับเข้า'],
       ['issue','ตัดออก'],
       ['history','ประวัติรายการ'],
+      ['byRequester','สรุปการเบิกรายคน'],
       ['report','แดชบอร์ดรายงาน'],
     ];
     return '<div class="sr-tabs">' + tabs.map(([k,label]) =>
@@ -1178,11 +1385,45 @@
     );
   }
 
-  function renderHistory(){
-    if (state.transactions.length === 0) {
-      return '<div class="sr-panel"><h2 class="panel-title">ประวัติรายการ</h2><div class="empty-state">ยังไม่มีประวัติการรับ-จ่าย</div></div>';
+  function computeVisibleHistory(){
+    const q = (state.historySearch || '').trim().toLowerCase();
+    const from = state.historyFrom || '';
+    const to = state.historyTo || '';
+    return state.transactions.filter(t => {
+      if (from && t.date < from) return false;
+      if (to && t.date > to) return false;
+      if (!q) return true;
+      const haystack = [
+        itemName(t.itemId), itemCode(t.itemId), itemUnit(t.itemId),
+        t.requester || '', t.note || '', (t.type === 'in' ? 'รับเข้า' : 'ตัดออก')
+      ].join(' ').toLowerCase();
+      return haystack.includes(q);
+    });
+  }
+
+  function historyToolbarHTML(){
+    return (
+      '<div class="toolbar-row">' +
+        '<div class="search-wrap">' +
+          '<input type="text" data-role="history-search" autocomplete="off" ' +
+            'placeholder="ค้นหาชื่อ รหัส คนเบิก หรือหมายเหตุ..." value="' + escapeHtml(state.historySearch || '') + '"/>' +
+          '<button type="button" class="search-clear-btn" data-role="history-clear-btn" data-action="history-clear-search" ' +
+            'title="ล้างคำค้นหา" style="display:' + (state.historySearch ? 'flex' : 'none') + ';">✕</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="history-filters">' +
+        '<div class="field"><label>ตั้งแต่วันที่</label><input type="date" data-role="history-from" value="' + escapeHtml(state.historyFrom || '') + '"/></div>' +
+        '<div class="field"><label>ถึงวันที่</label><input type="date" data-role="history-to" value="' + escapeHtml(state.historyTo || '') + '"/></div>' +
+        (state.historyFrom || state.historyTo ? '<button type="button" class="btn" data-action="history-clear-range">ล้างช่วงวันที่</button>' : '') +
+      '</div>'
+    );
+  }
+
+  function historyRowsHTML(rows){
+    if (rows.length === 0) {
+      return '<tr><td colspan="8"><div class="empty-state">ไม่พบรายการที่ตรงกับเงื่อนไข</div></td></tr>';
     }
-    const rows = state.transactions.map(t =>
+    return rows.map(t =>
       '<tr>' +
         '<td>' + fmtDate(t.date) + '</td>' +
         '<td><span class="chip ' + t.type + '">' + (t.type==='in'?'รับเข้า':'ตัดออก') + '</span></td>' +
@@ -1194,12 +1435,20 @@
         '<td><button class="icon-btn del" data-action="delete-tx" data-id="' + t.id + '" title="ลบรายการ">ลบ</button></td>' +
       '</tr>'
     ).join('');
+  }
+
+  function renderHistory(){
+    if (state.transactions.length === 0) {
+      return '<div class="sr-panel"><h2 class="panel-title">ประวัติรายการ</h2><div class="empty-state">ยังไม่มีประวัติการรับ-จ่าย</div></div>';
+    }
+    const visible = computeVisibleHistory();
     return (
       '<div class="sr-panel">' +
         '<h2 class="panel-title">ประวัติรายการทั้งหมด</h2>' +
+        historyToolbarHTML() +
         '<div class="sr-table-wrap"><table class="sr-table"><thead><tr>' +
           '<th>วันที่</th><th>ประเภท</th><th>รหัส</th><th>รายการ</th><th>จำนวน</th><th>คนเบิก</th><th>หมายเหตุ</th><th></th>' +
-        '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        '</tr></thead><tbody data-role="history-tbody">' + historyRowsHTML(visible) + '</tbody></table></div>' +
       '</div>'
     );
   }
@@ -1231,6 +1480,7 @@
     else if (state.tab === 'receive') panel = renderMoveForm('in');
     else if (state.tab === 'issue') panel = renderMoveForm('out');
     else if (state.tab === 'history') panel = renderHistory();
+    else if (state.tab === 'byRequester') panel = renderRequesterSummary();
     else if (state.tab === 'report') panel = renderReport();
 
     app.innerHTML =
@@ -1300,6 +1550,12 @@
     });
   }
 
+  function wireHistoryRows(root){
+    root.querySelectorAll('[data-action="delete-tx"]').forEach(btn => {
+      btn.addEventListener('click', () => deleteTransaction(btn.getAttribute('data-id')));
+    });
+  }
+
   function wireOverviewRows(root){
     root.querySelectorAll('[data-action="quick-in"]').forEach(btn => {
       btn.addEventListener('click', () => setTab('receive', btn.getAttribute('data-id')));
@@ -1355,6 +1611,40 @@
       });
     }
 
+    const historySearchInput = app.querySelector('[data-role="history-search"]');
+    const historyClearSearchBtn = app.querySelector('[data-role="history-clear-btn"]');
+    function refreshHistoryList(){
+      const tbody = app.querySelector('[data-role="history-tbody"]');
+      if (tbody) {
+        tbody.innerHTML = historyRowsHTML(computeVisibleHistory());
+        wireHistoryRows(tbody);
+      }
+      if (historyClearSearchBtn) historyClearSearchBtn.style.display = state.historySearch ? 'flex' : 'none';
+    }
+    if (historySearchInput) {
+      historySearchInput.addEventListener('input', () => {
+        state.historySearch = historySearchInput.value;
+        refreshHistoryList();
+      });
+    }
+    if (historyClearSearchBtn) historyClearSearchBtn.addEventListener('click', () => {
+      state.historySearch = '';
+      if (historySearchInput) historySearchInput.value = '';
+      refreshHistoryList();
+    });
+    const historyFromInput = app.querySelector('[data-role="history-from"]');
+    if (historyFromInput) historyFromInput.addEventListener('change', () => {
+      state.historyFrom = historyFromInput.value; render();
+    });
+    const historyToInput = app.querySelector('[data-role="history-to"]');
+    if (historyToInput) historyToInput.addEventListener('change', () => {
+      state.historyTo = historyToInput.value; render();
+    });
+    const historyClearRangeBtn = app.querySelector('[data-action="history-clear-range"]');
+    if (historyClearRangeBtn) historyClearRangeBtn.addEventListener('click', () => {
+      state.historyFrom = ''; state.historyTo = ''; render();
+    });
+
     app.querySelectorAll('[data-sort-field]').forEach(th => {
       th.addEventListener('click', () => handleSortClick(th.getAttribute('data-sort-field')));
     });
@@ -1407,9 +1697,7 @@
       } catch(err){ showToast('อัปโหลดรูปไม่สำเร็จ', 'warn'); }
     });
 
-    app.querySelectorAll('[data-action="delete-tx"]').forEach(btn => {
-      btn.addEventListener('click', () => deleteTransaction(btn.getAttribute('data-id')));
-    });
+    wireHistoryRows(app);
 
     const reportFromInput = app.querySelector('[data-role="report-from"]');
     if (reportFromInput) reportFromInput.addEventListener('change', () => { state.reportFrom = reportFromInput.value; render(); });
@@ -1433,6 +1721,45 @@
     if (reportExportExcelBtn) reportExportExcelBtn.addEventListener('click', exportReportExcel);
     const reportExportPdfBtn = app.querySelector('[data-action="report-export-pdf"]');
     if (reportExportPdfBtn) reportExportPdfBtn.addEventListener('click', exportReportPdf);
+
+    const reqFromInput = app.querySelector('[data-role="req-from"]');
+    if (reqFromInput) reqFromInput.addEventListener('change', () => { state.reqFrom = reqFromInput.value; render(); });
+    const reqToInput = app.querySelector('[data-role="req-to"]');
+    if (reqToInput) reqToInput.addEventListener('change', () => { state.reqTo = reqToInput.value; render(); });
+    const reqQuickMonth = app.querySelector('[data-action="req-quick-month"]');
+    if (reqQuickMonth) reqQuickMonth.addEventListener('click', () => {
+      state.reqFrom = firstDayOfMonthStr(); state.reqTo = todayStr(); render();
+    });
+    const reqQuick7d = app.querySelector('[data-action="req-quick-7d"]');
+    if (reqQuick7d) reqQuick7d.addEventListener('click', () => {
+      const d = new Date(); d.setDate(d.getDate() - 6);
+      state.reqFrom = d.toISOString().slice(0,10); state.reqTo = todayStr(); render();
+    });
+    const reqClearFilter = app.querySelector('[data-action="req-clear-filter"]');
+    if (reqClearFilter) reqClearFilter.addEventListener('click', () => {
+      state.reqFrom = ''; state.reqTo = ''; state.reqSearch = ''; render();
+    });
+
+    function wireRequesterBody(root){
+      const exportExcelBtn = root.querySelector('[data-action="req-export-excel"]');
+      if (exportExcelBtn) exportExcelBtn.addEventListener('click', exportRequesterExcel);
+      const exportPdfBtn = root.querySelector('[data-action="req-export-pdf"]');
+      if (exportPdfBtn) exportPdfBtn.addEventListener('click', exportRequesterPdf);
+    }
+    const reqBodyContainer = app.querySelector('[data-role="requester-body"]');
+    if (reqBodyContainer) wireRequesterBody(reqBodyContainer);
+
+    const reqSearchInput = app.querySelector('[data-role="req-search"]');
+    if (reqSearchInput) {
+      reqSearchInput.addEventListener('input', () => {
+        state.reqSearch = reqSearchInput.value;
+        const data = computeRequesterData(state.reqFrom, state.reqTo, state.reqSearch);
+        if (reqBodyContainer) {
+          reqBodyContainer.innerHTML = requesterBodyHTML(data);
+          wireRequesterBody(reqBodyContainer);
+        }
+      });
+    }
 
     const resetBtn = app.querySelector('[data-action="reset-all"]');
     if (resetBtn) resetBtn.addEventListener('click', resetAll);
