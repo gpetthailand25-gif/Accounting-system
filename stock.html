@@ -340,6 +340,7 @@
     padding: 4px 6px; border-radius: 8px; flex-shrink: 0;
   }
   .combo-edit-btn:hover { background: var(--purple-bg); color: var(--purple-text); }
+  .combo-del-btn:hover { background: var(--coral-bg); color: var(--coral-text); }
 
   /* ---- Receive / Issue forms ---- */
   .sr-form-wrap { display: grid; grid-template-columns: 330px 1fr; gap: 24px; }
@@ -667,6 +668,16 @@
     }
     req.name = newName;
     try { await saveData(); } catch(e){ showToast('บันทึกไม่สำเร็จ', 'warn'); }
+    return true;
+  }
+
+  async function deleteRequester(id){
+    const req = state.requesters.find(r => r.id === id);
+    if (!req) return false;
+    if (!confirm('ลบชื่อ "' + req.name + '" ออกจากรายชื่อผู้เบิก?\n(ประวัติการเบิกเดิมที่ใช้ชื่อนี้จะยังอยู่)')) return false;
+    state.requesters = state.requesters.filter(r => r.id !== id);
+    try { await saveData(); showToast('ลบชื่อผู้เบิกแล้ว'); }
+    catch(e){ showToast('บันทึกไม่สำเร็จ', 'warn'); }
     return true;
   }
 
@@ -2019,6 +2030,7 @@
         return '<div class="combo-option" data-id="' + r.id + '" data-name="' + escapeHtml(r.name) + '">' +
           '<span class="combo-name">' + escapeHtml(r.name) + '</span>' +
           '<button type="button" class="combo-edit-btn" data-action="edit-requester-name" data-id="' + r.id + '" title="แก้ไขชื่อ">✎</button>' +
+          '<button type="button" class="combo-edit-btn combo-del-btn" data-action="delete-requester-name" data-id="' + r.id + '" title="ลบชื่อ">🗑</button>' +
         '</div>';
       }).join('');
     }
@@ -2064,10 +2076,22 @@
     results.addEventListener('mousedown', async (e) => {
       const addOpt = e.target.closest('[data-action="add-requester"]');
       const editBtn = e.target.closest('[data-action="edit-requester-name"]');
+      const delBtn = e.target.closest('[data-action="delete-requester-name"]');
       const saveBtn = e.target.closest('[data-action="save-requester-name"]');
       const cancelBtn = e.target.closest('[data-action="cancel-requester-edit"]');
       const opt = e.target.closest('.combo-option:not(.combo-option-edit):not(.combo-add)');
 
+      if (delBtn) {
+        e.preventDefault();
+        const id = delBtn.getAttribute('data-id');
+        const req = state.requesters.find(r => r.id === id);
+        const wasSelected = req && input.value.trim().toLowerCase() === req.name.toLowerCase();
+        const ok = await deleteRequester(id);
+        if (ok && wasSelected) { input.value = ''; syncClear(); }
+        editingId = null;
+        open(input.value);
+        return;
+      }
       if (addOpt) {
         e.preventDefault();
         const name = addOpt.getAttribute('data-name');
