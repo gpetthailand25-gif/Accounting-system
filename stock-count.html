@@ -804,6 +804,7 @@ let ROUNDS = [];          // list of round meta
 let ACTIVE_ROUND = null;  // currently selected round id
 let DETAIL_CACHE = {};    // roundId -> detail array (loaded lazily)
 let EXC_CACHE = {};       // roundId -> location/LOT mismatch exception reports
+let DETAIL_UNSUB = null;  // unsubscribe fn for the live round_detail listener
 let AUDIT = [];
 
 let state = {tab:'dashboard', location:'', category:'', status:''};
@@ -920,6 +921,7 @@ async function init(){
     await createRound(true); // auto-create current month's round so app isn't empty
   }
   ACTIVE_ROUND = ROUNDS.find(r=>r.status!=='closed')?.id || ROUNDS[0]?.id;
+  attachDetailListener(ACTIVE_ROUND);
 
   populateFilters();
   renderIdentityBar();
@@ -956,6 +958,7 @@ async function createRound(silent, opts){
   await logAudit('สร้างรอบนับ', '-', id);
   if(!silent) toast('สร้างรอบนับ '+id+' สำเร็จ', 'success');
   ACTIVE_ROUND = id;
+  attachDetailListener(ACTIVE_ROUND);
   return id;
 }
 
@@ -969,6 +972,51 @@ async function saveDetail(roundId){
   await sSet('round_detail:'+roundId, DETAIL_CACHE[roundId], true);
 }
 async function saveRounds(){ await sSet('rounds', ROUNDS, true); }
+
+// เดิม submitCount/setReason อ่าน DETAIL_CACHE ในเครื่องตัวเอง (โหลดครั้งเดียวตอนเปิดแอป) มาแก้ 1 ช่อง
+// แล้ว sSet ทับทั้งก้อน (ทั้ง array ของทุกสินค้า) กลับไปที่ Firestore — ถ้ามีหลายคน/หลายเครื่องนับพร้อมกัน
+// เครื่องที่ save "ทีหลัง" จะเอาแคชเก่าของตัวเอง (ที่ไม่มีรายการที่คนอื่นเพิ่งนับ) ไปทับของจริงบนเซิร์ฟเวอร์
+// ทำให้ยอด "นับแล้ว" เพิ่ม/หายไม่แน่นอนตามจังหวะการ save ของแต่ละเครื่อง — นี่คือสาเหตุที่ตัวเลขเพี้ยนตอนรีเฟรช
+// แก้โดยใช้ Firestore transaction อ่านค่าล่าสุดจากเซิร์ฟเวอร์ก่อนเสมอ (เหมือนที่ mutateRoundsAtomic ทำกับ 'rounds')
+// แล้วแก้เฉพาะรายการที่ต้องการ ก่อน set กลับ — ป้องกันการเขียนทับข้อมูลของคนอื่น
+async function mutateDetailAtomic(roundId, mutatorFn){
+  const ref = db.collection('kv_store').doc('round_detail:'+roundId);
+  let result;
+  try{
+    await db.runTransaction(async (tx)=>{
+      const snap = await tx.get(ref);
+      let latest = [];
+      if(snap.exists){
+        const v = snap.data().value;
+        latest = v ? JSON.parse(v) : [];
+      }
+      result = mutatorFn(latest);
+      tx.set(ref, { value: JSON.stringify(latest), updatedAt: Date.now() });
+      DETAIL_CACHE[roundId] = latest;
+    });
+    return result;
+  }catch(e){
+    console.error('mutateDetailAtomic failed', roundId, e);
+    toast('บันทึกข้อมูลการนับไม่สำเร็จ: '+(e.code||e.message), 'error');
+    return null;
+  }
+}
+
+// ฟัง Firestore แบบเรียลไทม์: เมื่อเครื่อง/คนอื่นบันทึกการนับ dashboard ของเราจะอัปเดตเองโดยไม่ต้องกดรีเฟรช
+// ข้าม re-render ตอนอยู่หน้า 'mobile' (กำลังพิมพ์จำนวนนับอยู่) กับ 'import' เพื่อไม่ให้ไปรบกวน input ที่ผู้ใช้กำลังกรอก
+function attachDetailListener(roundId){
+  if(DETAIL_UNSUB){ DETAIL_UNSUB(); DETAIL_UNSUB = null; }
+  if(!roundId) return;
+  const ref = db.collection('kv_store').doc('round_detail:'+roundId);
+  DETAIL_UNSUB = ref.onSnapshot(snap=>{
+    if(!snap.exists) return;
+    const v = snap.data().value;
+    DETAIL_CACHE[roundId] = v ? JSON.parse(v) : [];
+    if(ACTIVE_ROUND===roundId && state.tab!=='mobile' && state.tab!=='import'){
+      render();
+    }
+  }, e=>console.error('detail listener failed', e));
+}
 
 // ป้องกันข้อมูลถูกเขียนทับเวลามีคนหลายคน/หลายเครื่องใช้งานพร้อมกัน:
 // อ่านข้อมูล 'rounds' ล่าสุดจากเซิร์ฟเวอร์ใน transaction แล้วค่อยแก้ไข+บันทึกแบบอะตอมมิก
@@ -1019,6 +1067,7 @@ async function deleteRound(roundId){
   await logAudit('ลบรอบนับ', roundId, '-');
   if(ACTIVE_ROUND===roundId){
     ACTIVE_ROUND = ROUNDS.find(x=>x.status!=='closed')?.id || ROUNDS[0]?.id || null;
+    attachDetailListener(ACTIVE_ROUND);
   }
   toast(`ลบรอบ ${roundId} เรียบร้อยแล้ว`, 'success');
 }
@@ -1026,35 +1075,41 @@ async function deleteRound(roundId){
 // ---------------- count entry ----------------
 async function submitCount(roundId, itemId, qty){
   if(isRoundLocked(roundId)){ toast('รอบนี้ปิดแล้ว ไม่สามารถแก้ไขข้อมูลการนับได้','error'); return null; }
-  const detail = await loadDetail(roundId);
-  const item = detail.find(x=>x.id===itemId);
-  if(!item) return;
-  const isRecount = item.countQty1 !== null;
-  const oldVal = item.finalQty;
-  if(!isRecount){
-    item.countQty1 = qty;
-    item.finalQty = qty;
-  } else {
-    item.countQty2 = qty;
-    item.finalQty = qty; // recount overrides as the authoritative figure
-  }
-  item.diff = item.finalQty - item.systemQty;
-  item.status = item.diff===0 ? 'matched' : 'mismatch';
-  item.countedBy = currentUser;
-  item.countedAt = nowStr();
-  await saveDetail(roundId);
+  let oldVal = null;
+  const item = await mutateDetailAtomic(roundId, latest=>{
+    const it = latest.find(x=>x.id===itemId);
+    if(!it) return null;
+    const isRecount = it.countQty1 !== null;
+    oldVal = it.finalQty;
+    if(!isRecount){
+      it.countQty1 = qty;
+      it.finalQty = qty;
+    } else {
+      it.countQty2 = qty;
+      it.finalQty = qty; // recount overrides as the authoritative figure
+    }
+    it.diff = it.finalQty - it.systemQty;
+    it.status = it.diff===0 ? 'matched' : 'mismatch';
+    it.countedBy = currentUser;
+    it.countedAt = nowStr();
+    return it;
+  });
+  if(!item) return null;
   await logAudit(`นับ ${item.code} (${item.loc})`, oldVal, item.finalQty);
   return item;
 }
 
 async function setReason(roundId, itemId, reason){
   if(isRoundLocked(roundId)){ toast('รอบนี้ปิดแล้ว ไม่สามารถแก้ไขเหตุผลได้','error'); return; }
-  const detail = await loadDetail(roundId);
-  const item = detail.find(x=>x.id===itemId);
+  let old = null;
+  const item = await mutateDetailAtomic(roundId, latest=>{
+    const it = latest.find(x=>x.id===itemId);
+    if(!it) return null;
+    old = it.reason;
+    it.reason = reason;
+    return it;
+  });
   if(!item) return;
-  const old = item.reason;
-  item.reason = reason;
-  await saveDetail(roundId);
   await logAudit(`ระบุเหตุผลผลต่าง ${item.code}`, old||'-', reason);
 }
 
@@ -1302,7 +1357,7 @@ function renderIdentityBar(){
   const sel = document.createElement('select');
   ROUNDS.forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=`${r.id} (${statusLabel(r.status)})`; sel.appendChild(o); });
   sel.value = ACTIVE_ROUND;
-  sel.onchange = ()=>{ ACTIVE_ROUND = sel.value; render(); };
+  sel.onchange = ()=>{ ACTIVE_ROUND = sel.value; attachDetailListener(ACTIVE_ROUND); render(); };
   pill.appendChild(sel);
   bar.appendChild(pill);
 }
