@@ -2041,7 +2041,14 @@
     input.addEventListener('click', () => open(input.value));
     input.addEventListener('input', () => { editingId = null; syncClear(); open(input.value); });
     input.addEventListener('keydown', (e) => { if (e.key === 'Escape'){ close(); input.blur(); } });
-    input.addEventListener('blur', () => { setTimeout(close, 150); });
+    input.addEventListener('blur', (e) => {
+      const next = e.relatedTarget;
+      if (next && results.contains(next)) return;
+      setTimeout(() => {
+        if (results.contains(document.activeElement)) return;
+        close();
+      }, 150);
+    });
     syncClear();
 
     if (clearBtn) {
