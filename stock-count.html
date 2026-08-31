@@ -860,9 +860,18 @@ function toast(msg, type){
 }
 
 async function logAudit(action, oldValue, newValue){
-  AUDIT.unshift({logId: Math.random().toString(36).slice(2,8), user: currentUser, datetime: nowStr(), action, oldValue: oldValue==null?'-':String(oldValue), newValue: newValue==null?'-':String(newValue)});
-  if(AUDIT.length>400) AUDIT = AUDIT.slice(0,400);
-  await sSet('audit_log', AUDIT, true);
+  // เดิมโค้ดนี้แก้ไข AUDIT (ที่โหลดเก็บไว้ในเครื่องตอนเปิดแอปครั้งเดียว) แล้วเซฟทับทั้งก้อนกลับไปเสมอ
+  // เป็นบั๊กแบบเดียวกับที่แก้ใน submitCount/reportException ไปแล้ว แต่พลาดจุดนี้ไป — ทำให้ถ้าสองคนบันทึกเหตุการณ์
+  // ใกล้เคียงกัน (เช่น แอนกับบีนับสินค้าคนละตัวพร้อมกัน) ใครเซฟทีหลังจะเอา AUDIT เก่าที่ยังไม่มี log ของอีกคนทับไปเลย
+  // ทำให้ log ของคนที่บันทึกก่อนหายไปจาก Audit Trail (แม้ว่ารายการนับจริงจะไม่หาย เพราะ submitCount ใช้ mutateDocAtomic แยกต่างหากแล้ว)
+  const entry = {logId: Math.random().toString(36).slice(2,8), user: currentUser, datetime: nowStr(), action, oldValue: oldValue==null?'-':String(oldValue), newValue: newValue==null?'-':String(newValue)};
+  const merged = await mutateDocAtomic('audit_log', (latest)=>{
+    let list = latest || AUDIT || [];
+    list = [entry, ...list];
+    if(list.length>400) list = list.slice(0,400);
+    return list;
+  });
+  if(merged!=null) AUDIT = merged;
 }
 
 function waitForLogin(){
