@@ -942,7 +942,7 @@ async function createRound(silent, opts){
   const location = opts?.location || 'ทุกคลัง';
   const id = `COUNT-${year}${String(month).padStart(2,'0')}-${Math.random().toString(36).slice(2,5).toUpperCase()}`;
   const detail = BASE.filter(i=> !location || location==='ทุกคลัง' || i.loc===location).map((i,idx)=>({
-    id: idx, code:i.c, name:i.n, cat:i.cat, unit:i.u, loc:i.loc, exp:i.exp, et:i.et, dte:i.dte,
+    id: idx, code:i.c, name:i.n, cat:i.cat, unit:i.u, loc:i.loc, exp:i.exp, et:i.et, dte:i.dte, lotRaw:i.lotRaw,
     systemQty:i.qty, unitCost:i.uc, stockValue:i.sv,
     countQty1:null, countQty2:null, finalQty:null, diff:null,
     status:'uncounted', reason:'', countedBy:null, countedAt:null
@@ -1221,7 +1221,7 @@ const TITLES = {
   dashboard: ['Dashboard', 'ภาพรวมความคืบหน้าการนับสต็อกสิ้นเดือน — ข้อมูลจริงจาก storage'],
   value: ['มูลค่าสต็อก', 'สรุปมูลค่าสต็อกทั้งหมด'],
   exec: ['สรุปรายงานผู้บริหาร', 'ภาพรวมสำหรับผู้บริหาร — พิมพ์เป็น PDF ได้'],
-  expiry: ['สินค้าใกล้หมดอายุ / หมดอายุ', 'เฉพาะกลุ่มวัตถุดิบที่ติดตามวันหมดอายุ'],
+  expiry: ['สินค้าใกล้หมดอายุ / หมดอายุ', 'ทุกประเภทยกเว้นบรรจุภัณฑ์'],
   nonmoving: ['สินค้าไม่เคลื่อนไหว', 'อิงจากวันที่เคลื่อนไหวล่าสุดในไฟล์ต้นทาง'],
   counts: ['รอบการนับสต็อก', 'สร้างรอบนับใหม่และติดตามสถานะ — บันทึกจริง'],
   mobile: ['หน้านับสต็อกสำหรับพนักงาน', 'บันทึกจำนวนที่นับได้จริง พร้อมยอดคงเหลือในระบบ'],
@@ -1460,7 +1460,7 @@ function varianceTable(rows, pageKey){
     const diffClass = diff>0?'pos':(diff<0?'neg':'');
     const tr = el('tr');
     const noteHtml = i.exceptionQty>0 ? `<div class="mini" style="color:var(--text-faint); margin-top:2px;">(${num(i.finalQty)} + ${num(i.exceptionQty)} จากตำแหน่งอื่น)</div>` : '';
-    tr.innerHTML = `<td class="mono">${i.code}</td><td class="prodname" title="${i.name}">${i.name}</td><td class="mono">${fmtDateTH(i.exp)||'-'}</td><td>${i.loc}</td>
+    tr.innerHTML = `<td class="mono">${i.code}</td><td class="prodname" title="${i.name}">${i.name}</td><td class="mono">${fmtLot(i)}</td><td>${i.loc}</td>
       <td class="num mono">${num(i.systemQty)}</td><td class="num mono">${qty==null?'-':num(qty)}${noteHtml}</td>
       <td class="num mono ${diffClass}">${diff==null?'-':(diff>0?'+':'')+num(diff)}</td>
       <td class="num mono ${diffClass}">${diff==null?'-':money(diff*i.unitCost)}</td><td></td><td class="mini">${i.reason||'—'}</td>`;
@@ -1491,7 +1491,7 @@ async function renderExecSummary(container){
   const activeItems = items.filter(i=>i.active!==false);
   const inactiveItems = items.filter(i=>i.active===false);
 
-  const expiryItems = items.filter(i=>i.et && i.cat==='วัตถุดิบ');
+  const expiryItems = items.filter(i=>i.et);
   const expired = expiryItems.filter(i=>i.dte!=null && i.dte<0);
   const near30 = expiryItems.filter(i=>i.dte!=null && i.dte>=0 && i.dte<=30);
   const near60 = expiryItems.filter(i=>i.dte!=null && i.dte>30 && i.dte<=60);
@@ -1544,7 +1544,7 @@ async function renderExecSummary(container){
   grid.appendChild(kpiCard('❌ มูลค่าสินค้าไม่ Active', money(inactiveItems.reduce((a,i)=>a+i.sv,0)),'','red'));
   container.appendChild(grid);
 
-  container.appendChild(el('div','section-title','⏰ ความเสี่ยงด้านวันหมดอายุ (เฉพาะวัตถุดิบ)<div class="line"></div>'));
+  container.appendChild(el('div','section-title','⏰ ความเสี่ยงด้านวันหมดอายุ (ทุกประเภทยกเว้นบรรจุภัณฑ์)<div class="line"></div>'));
   const gridExp = el('div','kpi-grid');
   gridExp.appendChild(kpiCard((expired.length===0?'✅':'❌')+' มูลค่าสินค้าหมดอายุแล้ว', money(expired.reduce((a,i)=>a+i.sv,0)),'','red'));
   gridExp.appendChild(kpiCard((expired.length===0?'✅':'❌')+' จำนวนรายการหมดอายุแล้ว', num(expired.length),'','red'));
@@ -1670,9 +1670,9 @@ function renderValue(container){
 let expiryLevelFilter = null; // null = ทั้งหมด, หรือ 'expired'|'d7'|'d30'|'d60'|'d90'
 
 function renderExpiry(container){
-  // เฉพาะประเภท "วัตถุดิบ" ที่มีวันหมดอายุเท่านั้น — บรรจุภัณฑ์ไม่มีวันหมดอายุ จึงไม่แสดงในหน้านี้
-  const items = filterBase(BASE).filter(i=>i.et && i.cat==='วัตถุดิบ');
-  container.appendChild(el('div','section-title','Expiry Monitoring <span style="color:var(--text-faint); text-transform:none; font-weight:400;">— เฉพาะประเภทวัตถุดิบที่มีวันหมดอายุเท่านั้น (ไม่รวมบรรจุภัณฑ์) · คลิกที่การ์ดเพื่อกรองระดับ</span><div class="line"></div>'));
+  // ทุกประเภทที่มีวันหมดอายุ (LOT = วันหมดอายุ) ยกเว้น "บรรจุภัณฑ์" ที่ไม่ต้องสนใจ LOT/วันหมดอายุ
+  const items = filterBase(BASE).filter(i=>i.et);
+  container.appendChild(el('div','section-title','Expiry Monitoring <span style="color:var(--text-faint); text-transform:none; font-weight:400;">— ทุกประเภทที่มีวันหมดอายุ (ไม่รวมบรรจุภัณฑ์) · คลิกที่การ์ดเพื่อกรองระดับ</span><div class="line"></div>'));
   const buckets={expired:[],d7:[],d30:[],d60:[],d90:[]};
   items.forEach(i=>{ const d=i.dte; if(d==null) return;
     if(d<0) buckets.expired.push(i); else if(d<=7) buckets.d7.push(i); else if(d<=30) buckets.d30.push(i); else if(d<=60) buckets.d60.push(i); else if(d<=90) buckets.d90.push(i);
@@ -1730,7 +1730,7 @@ function renderNonMoving(container){
   t.innerHTML=`<thead><tr>${sortableTh('รหัส','c','nonmoving')}${sortableTh('ชื่อสินค้า','n','nonmoving')}${sortableTh('LOT','exp','nonmoving')}${sortableTh('Location','loc','nonmoving')}${sortableTh('Stock Qty','qty','nonmoving',true)}${sortableTh('หน่วย','u','nonmoving')}${sortableTh('Unit Cost','uc','nonmoving',true)}${sortableTh('Stock Value','sv','nonmoving',true)}${sortableTh('Last Movement','lmd','nonmoving')}</tr></thead>`;
   const tb=el('tbody');
   const sortedInactive = applySorting(inactive, 'nonmoving', {c:i=>i.c,n:i=>i.n,exp:i=>i.exp||'',loc:i=>i.loc,qty:i=>i.qty,u:i=>i.u,uc:i=>i.uc,sv:i=>i.sv,lmd:i=>i.lmd||''});
-  sortedInactive.forEach(i=>{ const tr=el('tr'); tr.innerHTML=`<td class="mono">${i.c}</td><td class="prodname" title="${i.n}">${i.n}</td><td class="mono">${fmtDateTH(i.exp)||'-'}</td><td>${i.loc}</td><td class="num mono">${num(i.qty)}</td><td>${i.u}</td><td class="num mono">${money(i.uc)}</td><td class="num mono">${money(i.sv)}</td><td class="mono">${i.lmd} <span style="color:var(--text-faint)">(${i.lmt})</span></td>`; tb.appendChild(tr); });
+  sortedInactive.forEach(i=>{ const tr=el('tr'); tr.innerHTML=`<td class="mono">${i.c}</td><td class="prodname" title="${i.n}">${i.n}</td><td class="mono">${fmtLot(i)}</td><td>${i.loc}</td><td class="num mono">${num(i.qty)}</td><td>${i.u}</td><td class="num mono">${money(i.uc)}</td><td class="num mono">${money(i.sv)}</td><td class="mono">${i.lmd} <span style="color:var(--text-faint)">(${i.lmt})</span></td>`; tb.appendChild(tr); });
   t.appendChild(tb); wrap.appendChild(t); container.appendChild(wrap);
   wireSortableHeaders(t, render);
 }
@@ -1891,7 +1891,7 @@ async function renderMobile(container){
         <div class="code">${item.code}</div>
         <div class="name">${item.name}</div>
         <div class="meta">
-          <div><span>LOT</span>${fmtDateTH(item.exp)||'-'}</div>
+          <div><span>LOT</span>${fmtLot(item)}</div>
           <div><span>หน่วย</span>${item.unit}</div>
           <div><span>Location</span>${item.loc}</div>
           <div class="sysqty"><span>ยอดคงเหลือในระบบ</span>${num(item.systemQty)} ${item.unit}</div>
@@ -2199,7 +2199,7 @@ async function renderReview(container){
     const diffClass = i.effDiff>0?'pos':(i.effDiff<0?'neg':'');
     const tr = el('tr');
     const countCellNote = i.exceptionQty>0 ? `<div class="mini" style="color:var(--text-faint); margin-top:2px;">(${num(i.finalQty)} + ${num(i.exceptionQty)} จากตำแหน่งอื่น)</div>` : '';
-    tr.innerHTML = `<td class="mono">${i.code}</td><td class="prodname" title="${i.name}">${i.name}</td><td class="mono">${fmtDateTH(i.exp)||'-'}</td><td>${i.loc}</td>
+    tr.innerHTML = `<td class="mono">${i.code}</td><td class="prodname" title="${i.name}">${i.name}</td><td class="mono">${fmtLot(i)}</td><td>${i.loc}</td>
       <td class="num mono">${num(i.systemQty)}</td><td class="num mono">${num(i.effQty)}${countCellNote}</td>
       <td class="num mono ${diffClass}">${i.effDiff>0?'+':''}${num(i.effDiff)}</td><td></td><td></td>`;
     tr.children[7].appendChild(statusBadge(i.effStatus));
@@ -2306,6 +2306,15 @@ function fmtDateTH(iso){
   if(!m) return iso;
   return `${m[3]}/${m[2]}/${m[1]}`;
 }
+// แสดงผลคอลัมน์ LOT ในรายงาน/หน้าจอต่างๆ: ถ้าเป็นวัตถุดิบที่มีวันหมดอายุจริง (exp) ให้โชว์วันที่แบบไทย
+// ถ้าไม่ใช่ ให้โชว์รหัส LOT แบบข้อความดิบจากไฟล์ (lotRaw) แทน — เดิมโค้ดใช้ fmtDateTH(i.exp) อย่างเดียว
+// ซึ่ง exp เป็น null เสมอถ้าไม่ใช่วัตถุดิบ ทำให้คอลัมน์ LOT ในรายงานไม่โชว์อะไรเลยแม้ไฟล์จะมีรหัส LOT อยู่จริง
+function fmtLot(i){
+  if(!i) return '-';
+  if(i.exp) return fmtDateTH(i.exp);
+  if(i.lotRaw) return i.lotRaw;
+  return '-';
+}
 // แปลง ISO เป็น DD/MM/YYYY แบบ พ.ศ. (ปี ค.ศ.+543) — ใช้เฉพาะตอน export กลับไฟล์ AppSheet เพราะไฟล์ต้นฉบับ (Lot/Date) ใช้ปี พ.ศ.
 function fmtDateBE(iso){
   if(!iso) return '';
@@ -2356,16 +2365,24 @@ function rowsToItems(rows){
     const expDt = parseThaiDateJS(r['Lot']);
     const lmDt = parseThaiDateJS(r['Date']);
     const cat = (r['Product type']||'').trim();
-    const et = cat === 'วัตถุดิบ' && !!expDt;
+    const et = cat !== 'บรรจุภัณฑ์' && !!expDt;
     const dte = et && expDt ? Math.round((expDt - today)/86400000) : null;
     const dsm = lmDt ? Math.round((today - lmDt)/86400000) : null;
     const sv = r['Residual value']!==undefined && r['Residual value']!=='' ? parseNumJS(r['Residual value']) : qty*uc;
     // คอลัมน์ Active (Y/N): ถ้าไฟล์ไม่มีคอลัมน์นี้ (undefined) ให้ถือว่า active=true เพื่อไม่กระทบข้อมูลเดิม
     const activeRaw = r['Active'];
     const active = activeRaw===undefined || activeRaw===null || activeRaw==='' ? true : String(activeRaw).trim().toUpperCase()==='Y';
+    // lotKey = ตัวระบุ LOT จริงสำหรับใช้กันแถวซ้ำ (Product+LOT+Location) — ต้องไม่ผูกกับ "et"
+    // (et ใช้เฉพาะเป็น flag แจ้งเตือนวันหมดอายุของวัตถุดิบเท่านั้น) เดิมโค้ดใช้ exp (=null เสมอถ้าไม่ใช่วัตถุดิบ)
+    // เป็น key ทำให้ทุก LOT ของสินค้าที่ไม่ใช่วัตถุดิบในโลเคชันเดียวกันถูกยุบรวมเหลือแถวเดียว ข้อมูลจึงหายไปตอนนำเข้า
+    // ยกเว้น "บรรจุภัณฑ์" — ไม่ต้องยึด LOT เป็น key เลย ให้ยึดแค่รหัส+โลเคชันแล้วรวมยอดเข้าด้วยกัน (lotKey ว่าง)
+    const lotKey = cat === 'บรรจุภัณฑ์' ? '' : (expDt ? isoDate(expDt) : (r['Lot']!=null ? String(r['Lot']).trim() : ''));
+    // lotRaw = รหัส LOT แบบข้อความดิบไว้ "แสดงผล" ในรายงาน (เช่น LOT ที่เป็นรหัสข้อความ ไม่ใช่วันที่)
+    // ไม่ตั้งให้บรรจุภัณฑ์เพราะยอดถูกรวมข้าม LOT แล้ว จึงไม่มี LOT เดียวที่เป็นตัวแทนได้ถูกต้อง
+    const lotRaw = cat === 'บรรจุภัณฑ์' ? '' : (r['Lot']!=null ? String(r['Lot']).trim() : '');
     items.push({
       c: pk.code, n: pk.name, cat: cat, u: (r['Unit']||'').trim(), loc: (r['Location']||'').trim(),
-      exp: et ? isoDate(expDt) : null, et, dte,
+      exp: et ? isoDate(expDt) : null, et, dte, lotKey, lotRaw,
       qty, uc, sv, active,
       lmd: lmDt ? isoDate(lmDt) : null, lmt: (r['Type']||'').trim(), dsm,
     });
@@ -2376,17 +2393,23 @@ function rowsToItems(rows){
 }
 
 // ไฟล์รายเดือนบางไฟล์เป็น log เคลื่อนไหวสะสม จึงอาจมีหลายแถวต่อ Product+LOT+Location เดียวกัน
-// (คนละวันที่/RefID) — เก็บไว้เฉพาะแถวที่มี "วันที่เคลื่อนไหวล่าสุด (lmd)" ล่าสุดจริงต่อ 1 คีย์เท่านั้น
-// เพื่อไม่ให้ยอดคงเหลือซ้ำซ้อนตอนนำเข้า
+// (คนละวันที่/RefID) — เมื่อรหัสสินค้า+LOT+Location ซ้ำกันจริง ให้ "รวมยอด" Lot_Balance (และ Residual value)
+// ของทุกแถวที่ซ้ำกันเข้าด้วยกัน (ไม่ใช่เลือกเก็บแค่แถวเดียว) ส่วนข้อมูลอื่น (วันที่/ประเภทล่าสุด ฯลฯ)
+// ยึดจากแถวที่มีวันที่เคลื่อนไหวล่าสุด ถ้าไม่มีวันที่ให้เทียบเลยก็ยึดแถวหลังสุดในไฟล์
 function dedupLatestByKey(items){
   const map = new Map();
   items.forEach(it=>{
-    const key = it.c+'|'+(it.exp||'')+'|'+it.loc;
+    const key = it.c+'|'+(it.lotKey||'')+'|'+it.loc;
     const existing = map.get(key);
-    if(!existing){ map.set(key, it); return; }
+    if(!existing){ map.set(key, {...it}); return; }
     const a = existing.lmd ? new Date(existing.lmd) : null;
     const b = it.lmd ? new Date(it.lmd) : null;
-    if(b && (!a || b > a)) map.set(key, it);
+    const useNewAsBase = (b && (!a || b >= a)) || (!b && !a);
+    // ยอดรวม: บวก Lot_Balance และ Residual value ของทุกแถวที่ key ซ้ำกันเข้าด้วยกันเสมอ
+    const mergedQty = existing.qty + it.qty;
+    const mergedSv = existing.sv + it.sv;
+    const base = useNewAsBase ? {...it} : existing;
+    map.set(key, {...base, qty: mergedQty, sv: mergedSv});
   });
   return Array.from(map.values());
 }
@@ -2536,14 +2559,14 @@ function renderImportPreview(){
   summary.innerHTML = `
     <div class="stat"><div class="n">${importState.rows.length}</div><div class="l">แถวทั้งหมดในไฟล์</div></div>
     <div class="stat"><div class="n">${importState.items.length}</div><div class="l">Product+LOT+Location ไม่ซ้ำ (ใช้ยอดล่าสุด)</div></div>
-    <div class="stat"><div class="n" style="color:${dupCount>0?'var(--amber)':'var(--text-dim)'}">${dupCount}</div><div class="l">แถวซ้ำที่ถูกยุบ (เลือกวันที่ล่าสุด)</div></div>
+    <div class="stat"><div class="n" style="color:${dupCount>0?'var(--amber)':'var(--text-dim)'}">${dupCount}</div><div class="l">แถวซ้ำที่ถูกยุบ (รวมยอด Lot Balance)</div></div>
     <div class="stat"><div class="n" style="color:${importState.anomalies.length?'var(--red)':'var(--green)'}">${importState.anomalies.length}</div><div class="l">รายการผิดปกติ</div></div>
     <div class="stat"><div class="n">${new Set(importState.items.map(i=>i.c)).size}</div><div class="l">SKU ไม่ซ้ำ</div></div>
     <div class="stat"><div class="n">${new Set(importState.items.map(i=>i.loc)).size}</div><div class="l">Location</div></div>
   `;
   holder.appendChild(summary);
   if(dupCount>0){
-    holder.appendChild(el('div','footer-note',`พบ ${dupCount} แถวที่ Product+LOT+Location ซ้ำกัน (ไฟล์นี้น่าจะเป็น log เคลื่อนไหวสะสม) — ระบบเลือกเก็บเฉพาะแถวที่มี "วันที่เคลื่อนไหวล่าสุด" ล่าสุดจริงต่อ 1 รายการ เพื่อใช้เป็นยอดคงเหลือปัจจุบัน`));
+    holder.appendChild(el('div','footer-note',`พบ ${dupCount} แถวที่ Product+LOT+Location ซ้ำกัน (ไฟล์นี้น่าจะเป็น log เคลื่อนไหวสะสม) — ระบบรวมยอด Lot Balance (และ Residual value) ของทุกแถวที่ Product+LOT+Location ซ้ำกันเข้าด้วยกัน เพื่อใช้เป็นยอดคงเหลือปัจจุบัน`));
   }
 
   if(importState.anomalies.length>0){
@@ -2621,11 +2644,11 @@ async function doImport(){
   const before = BASE.length;
   let added=0, updated=0;
   if(importState.mode==='replace'){
-    const oldKeys = new Set(BASE.map(i=>i.c+'|'+i.exp+'|'+i.loc));
+    const oldKeys = new Set(BASE.map(i=>i.c+'|'+(i.lotKey||'')+'|'+i.loc));
     BASE = importState.items.map(i=>({...i}));
-    BASE.forEach(i=>{ const k=i.c+'|'+i.exp+'|'+i.loc; if(oldKeys.has(k)) updated++; else added++; });
+    BASE.forEach(i=>{ const k=i.c+'|'+(i.lotKey||'')+'|'+i.loc; if(oldKeys.has(k)) updated++; else added++; });
   } else {
-    const key = i => i.c+'|'+i.exp+'|'+i.loc;
+    const key = i => i.c+'|'+(i.lotKey||'')+'|'+i.loc;
     const map = new Map(BASE.map(i=>[key(i), i]));
     importState.items.forEach(ni=>{
       const k = key(ni);
@@ -2673,7 +2696,7 @@ function reportStockCount(){
   const exceptions = ACTIVE_ROUND ? (EXC_CACHE[ACTIVE_ROUND]||[]) : [];
   const detail = applyExceptionMatches(filterDetail(rawDetail), exceptions);
   const headers = ['ลำดับ','Product Code','ชื่อสินค้า','LOT','Location','System Qty','Count Qty','Final Qty (รวม exception)','Diff','สถานะ','นับโดย','เวลา'];
-  const rows = detail.map((i,idx)=>[idx+1,i.code,i.name,fmtDateTH(i.exp)||'-',i.loc,i.systemQty,i.countQty1??'-',i.effQty??'-',i.effDiff??'-',statusLabelTH(i.effStatus||i.status),i.countedBy||'-',i.countedAt||'-']);
+  const rows = detail.map((i,idx)=>[idx+1,i.code,i.name,fmtLot(i),i.loc,i.systemQty,i.countQty1??'-',i.effQty??'-',i.effDiff??'-',statusLabelTH(i.effStatus||i.status),i.countedBy||'-',i.countedAt||'-']);
   return {headers, rows, title:`Stock Count Report — ${ACTIVE_ROUND||''}`};
 }
 function reportVariance(){
@@ -2681,11 +2704,11 @@ function reportVariance(){
   const exceptions = ACTIVE_ROUND ? (EXC_CACHE[ACTIVE_ROUND]||[]) : [];
   const mismatched = applyExceptionMatches(filterDetail(rawDetail), exceptions).filter(i=>i.effStatus==='mismatch');
   const headers = ['ลำดับ','Product Code','ชื่อสินค้า','LOT','Location','System Qty','Final Qty (รวม exception)','Diff','มูลค่าผลต่าง','เหตุผล'];
-  const rows = mismatched.map((i,idx)=>[idx+1,i.code,i.name,fmtDateTH(i.exp)||'-',i.loc,i.systemQty,i.effQty,i.effDiff,Math.round(i.effDiff*i.unitCost),i.reason||'-']);
+  const rows = mismatched.map((i,idx)=>[idx+1,i.code,i.name,fmtLot(i),i.loc,i.systemQty,i.effQty,i.effDiff,Math.round(i.effDiff*i.unitCost),i.reason||'-']);
   return {headers, rows, title:`Variance Report — ${ACTIVE_ROUND||''}`};
 }
 function reportExpiry(){
-  const items = filterBase(BASE).filter(i=>i.et && i.cat==='วัตถุดิบ' && i.dte!=null).sort((a,b)=>a.dte-b.dte);
+  const items = filterBase(BASE).filter(i=>i.et && i.dte!=null).sort((a,b)=>a.dte-b.dte);
   const headers = ['ลำดับ','Product Code','ชื่อสินค้า','LOT/วันหมดอายุ','เหลือ (วัน)','Location','จำนวน','หน่วย','มูลค่า'];
   const rows = items.map((i,idx)=>[idx+1,i.c,i.n,fmtDateTH(i.exp),i.dte,i.loc,i.qty,i.u,Math.round(i.sv)]);
   return {headers, rows, title:'Expiry Report'};
@@ -2693,13 +2716,13 @@ function reportExpiry(){
 function reportNonMoving(){
   const items = filterBase(BASE).filter(i=>i.active===false).sort((a,b)=>b.sv-a.sv);
   const headers = ['ลำดับ','Product Code','ชื่อสินค้า','LOT','Location','Stock Qty','หน่วย','Unit Cost','Stock Value','Last Movement'];
-  const rows = items.map((i,idx)=>[idx+1,i.c,i.n,fmtDateTH(i.exp)||'-',i.loc,i.qty,i.u,i.uc,Math.round(i.sv),i.lmd||'-']);
+  const rows = items.map((i,idx)=>[idx+1,i.c,i.n,fmtLot(i),i.loc,i.qty,i.u,i.uc,Math.round(i.sv),i.lmd||'-']);
   return {headers, rows, title:'Non-Moving Stock Report'};
 }
 function reportValuation(){
   const items = filterBase(BASE).sort((a,b)=>b.sv-a.sv);
   const headers = ['ลำดับ','Product Code','ชื่อสินค้า','Category','LOT','Location','Qty','หน่วย','Unit Cost','Stock Value'];
-  const rows = items.map((i,idx)=>[idx+1,i.c,i.n,i.cat,fmtDateTH(i.exp)||'-',i.loc,i.qty,i.u,i.uc,Math.round(i.sv)]);
+  const rows = items.map((i,idx)=>[idx+1,i.c,i.n,i.cat,fmtLot(i),i.loc,i.qty,i.u,i.uc,Math.round(i.sv)]);
   return {headers, rows, title:'Stock Valuation Report'};
 }
 function statusLabelTH(s){ return {matched:'ตรง', mismatch:'ไม่ตรง', uncounted:'ยังไม่ได้นับ'}[s]||s; }
