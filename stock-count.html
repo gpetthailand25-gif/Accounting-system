@@ -995,6 +995,34 @@ async function mutateRoundsAtomic(mutatorFn){
   }
 }
 
+// ป้องกันข้อมูลถูกเขียนทับเวลามีคนหลายคน/หลายเครื่องใช้งานพร้อมกัน (เวอร์ชันทั่วไปสำหรับ key ใดก็ได้):
+// อ่านค่าล่าสุดจากเซิร์ฟเวอร์ใน transaction ก่อนเสมอ (ไม่ใช้ค่าที่ค้างอยู่ใน cache ของเครื่องนี้ ซึ่งอาจเก่ากว่าของคนอื่นที่เพิ่งบันทึกไป)
+// แล้วค่อยแก้ไข+บันทึกกลับแบบอะตอมมิก mutatorFn รับค่าล่าสุดจากเซิร์ฟเวอร์ (หรือ null ถ้ายังไม่มี) แล้วคืนค่าที่แก้ไขแล้ว
+// เดิมโค้ดจุดที่บันทึกทีละรายการ (เช่น submitCount/reportException) อ่าน array ทั้งก้อนเข้า cache ของเครื่องตัวเองครั้งเดียวตอนเปิดหน้า
+// แล้วเซฟทับด้วย cache ทั้งก้อนทุกครั้งที่มีการแก้ไข — ถ้าอีกคนบันทึกแทรกเข้ามาระหว่างนั้น (เช่น นับหน้าบรรจุภัณฑ์/วัตถุดิบพร้อมกัน)
+// การเซฟทีหลังจะเขียนทับข้อมูลของอีกคนทิ้งไปเลย เพราะ cache ของเครื่องตัวเองไม่มีการเปลี่ยนแปลงนั้นอยู่
+async function mutateDocAtomic(key, mutatorFn){
+  const ref = db.collection('kv_store').doc(key);
+  let result;
+  try{
+    await db.runTransaction(async (tx)=>{
+      const snap = await tx.get(ref);
+      let latest = null;
+      if(snap.exists){
+        const v = snap.data().value;
+        latest = v ? JSON.parse(v) : null;
+      }
+      result = mutatorFn(latest);
+      tx.set(ref, { value: JSON.stringify(result), updatedAt: Date.now() });
+    });
+    return result;
+  }catch(e){
+    console.error('mutateDocAtomic failed', key, e);
+    toast('บันทึกไม่สำเร็จ ('+key+'): '+(e.code||e.message), 'error');
+    return null;
+  }
+}
+
 async function setRoundStatus(roundId, status){
   const r = ROUNDS.find(x=>x.id===roundId);
   const old = r ? r.status : null;
@@ -1024,38 +1052,53 @@ async function deleteRound(roundId){
 }
 
 // ---------------- count entry ----------------
+// ใช้ mutateDocAtomic แทนการอ่าน DETAIL_CACHE (ที่อาจค้างอยู่ในเครื่อง) แล้วเซฟทับทั้งก้อน
+// เพราะถ้าสองคนนับพร้อมกัน (เช่น คนหนึ่งนับหน้าบรรจุภัณฑ์ อีกคนนับหน้าวัตถุดิบ) และ cache ของแต่ละคนไม่มีของอีกคน
+// การเซฟทับทั้งก้อนแบบเดิมจะทำให้รายการที่อีกคนเพิ่งบันทึกไปหายไป — ที่นี่จะดึงยอดล่าสุดจากเซิร์ฟเวอร์มาก่อนแก้ไขเสมอ
 async function submitCount(roundId, itemId, qty){
   if(isRoundLocked(roundId)){ toast('รอบนี้ปิดแล้ว ไม่สามารถแก้ไขข้อมูลการนับได้','error'); return null; }
-  const detail = await loadDetail(roundId);
-  const item = detail.find(x=>x.id===itemId);
-  if(!item) return;
-  const isRecount = item.countQty1 !== null;
-  const oldVal = item.finalQty;
-  if(!isRecount){
-    item.countQty1 = qty;
-    item.finalQty = qty;
-  } else {
-    item.countQty2 = qty;
-    item.finalQty = qty; // recount overrides as the authoritative figure
-  }
-  item.diff = item.finalQty - item.systemQty;
-  item.status = item.diff===0 ? 'matched' : 'mismatch';
-  item.countedBy = currentUser;
-  item.countedAt = nowStr();
-  await saveDetail(roundId);
-  await logAudit(`นับ ${item.code} (${item.loc})`, oldVal, item.finalQty);
-  return item;
+  let changedItem = null, oldVal = null;
+  const merged = await mutateDocAtomic('round_detail:'+roundId, (latest)=>{
+    const list = latest || DETAIL_CACHE[roundId] || [];
+    const item = list.find(x=>x.id===itemId);
+    if(!item) return list;
+    const isRecount = item.countQty1 !== null;
+    oldVal = item.finalQty;
+    if(!isRecount){
+      item.countQty1 = qty;
+      item.finalQty = qty;
+    } else {
+      item.countQty2 = qty;
+      item.finalQty = qty; // recount overrides as the authoritative figure
+    }
+    item.diff = item.finalQty - item.systemQty;
+    item.status = item.diff===0 ? 'matched' : 'mismatch';
+    item.countedBy = currentUser;
+    item.countedAt = nowStr();
+    changedItem = item;
+    return list;
+  });
+  if(merged==null) return null; // การบันทึกล้มเหลว (toast แจ้งไปแล้วใน mutateDocAtomic)
+  DETAIL_CACHE[roundId] = merged; // sync cache ของเครื่องนี้ให้ตรงกับเซิร์ฟเวอร์ (รวมรายการที่คนอื่นเพิ่งบันทึกไปด้วย)
+  if(changedItem) await logAudit(`นับ ${changedItem.code} (${changedItem.loc})`, oldVal, changedItem.finalQty);
+  return changedItem;
 }
 
 async function setReason(roundId, itemId, reason){
   if(isRoundLocked(roundId)){ toast('รอบนี้ปิดแล้ว ไม่สามารถแก้ไขเหตุผลได้','error'); return; }
-  const detail = await loadDetail(roundId);
-  const item = detail.find(x=>x.id===itemId);
-  if(!item) return;
-  const old = item.reason;
-  item.reason = reason;
-  await saveDetail(roundId);
-  await logAudit(`ระบุเหตุผลผลต่าง ${item.code}`, old||'-', reason);
+  let old = null, code = itemId;
+  const merged = await mutateDocAtomic('round_detail:'+roundId, (latest)=>{
+    const list = latest || DETAIL_CACHE[roundId] || [];
+    const item = list.find(x=>x.id===itemId);
+    if(!item) return list;
+    old = item.reason;
+    item.reason = reason;
+    code = item.code;
+    return list;
+  });
+  if(merged==null) return;
+  DETAIL_CACHE[roundId] = merged;
+  await logAudit(`ระบุเหตุผลผลต่าง ${code}`, old||'-', reason);
 }
 
 // ---------------- location / LOT mismatch exceptions ----------------
@@ -1104,15 +1147,21 @@ function applyExceptionMatches(detail, exceptions){
 
 async function reportException(roundId, payload){
   if(isRoundLocked(roundId)){ toast('รอบนี้ปิดแล้ว ไม่สามารถแจ้งรายงานผิดปกติเพิ่มได้','error'); return null; }
-  const list = await loadExceptions(roundId);
   const rec = {
     id: Math.random().toString(36).slice(2,9),
     ...payload,
     reportedBy: currentUser, reportedAt: nowStr(),
     status: 'pending', resolution: ''
   };
-  list.unshift(rec);
-  await saveExceptions(roundId);
+  // ใช้ mutateDocAtomic เพื่ออ่านรายการล่าสุดจากเซิร์ฟเวอร์ก่อนเพิ่มรายการใหม่เข้าไป
+  // ป้องกันรายงานที่คนอื่นเพิ่งแจ้งเข้ามาพร้อมกันหายไปตอนเซฟทับ
+  const merged = await mutateDocAtomic('exceptions:'+roundId, (latest)=>{
+    const list = latest || EXC_CACHE[roundId] || [];
+    list.unshift(rec);
+    return list;
+  });
+  if(merged==null) return null;
+  EXC_CACHE[roundId] = merged;
   await logAudit(
     `แจ้งพบผิด${payload.type==='location_mismatch'?'ตำแหน่ง':'LOT'} ${payload.code}`,
     '-', `${payload.foundLoc||''} ${payload.foundExp||''} จำนวน=${payload.foundQty}`
@@ -1122,34 +1171,50 @@ async function reportException(roundId, payload){
 
 async function resolveException(roundId, excId, action, note){
   if(isRoundLocked(roundId)){ toast('รอบนี้ปิดแล้ว ไม่สามารถดำเนินการรายงานผิดปกติได้','error'); return; }
-  const list = await loadExceptions(roundId);
-  const exc = list.find(e=>e.id===excId);
-  if(!exc) return;
-  exc.status = 'resolved';
-  exc.resolution = action + (note ? ' — '+note : '');
-  exc.resolvedBy = currentUser; exc.resolvedAt = nowStr();
-  await saveExceptions(roundId);
+  let excCopy = null;
+  const mergedExc = await mutateDocAtomic('exceptions:'+roundId, (latest)=>{
+    const list = latest || EXC_CACHE[roundId] || [];
+    const exc = list.find(e=>e.id===excId);
+    if(!exc) return list;
+    exc.status = 'resolved';
+    exc.resolution = action + (note ? ' — '+note : '');
+    exc.resolvedBy = currentUser; exc.resolvedAt = nowStr();
+    excCopy = {...exc};
+    return list;
+  });
+  if(mergedExc==null || !excCopy) return;
+  EXC_CACHE[roundId] = mergedExc;
 
   if(action==='transfer_location'){
-    const rec = BASE.find(i=> i.c===exc.code && i.exp===exc.origExp && i.loc===exc.origLoc);
-    if(rec){
-      const oldLoc = rec.loc;
-      rec.loc = exc.foundLoc;
-      await sSet('seed_v1', BASE, true);
-      await logAudit(`แก้ไขตำแหน่ง Stock Balance ${exc.code}`, oldLoc, exc.foundLoc);
+    let oldLoc = null;
+    const mergedBase = await mutateDocAtomic('seed_v1', (latest)=>{
+      const list = latest || BASE || [];
+      const rec = list.find(i=> i.c===excCopy.code && i.exp===excCopy.origExp && i.loc===excCopy.origLoc);
+      if(rec){ oldLoc = rec.loc; rec.loc = excCopy.foundLoc; }
+      return list;
+    });
+    if(mergedBase!=null){
+      BASE = mergedBase;
+      if(oldLoc!=null) await logAudit(`แก้ไขตำแหน่ง Stock Balance ${excCopy.code}`, oldLoc, excCopy.foundLoc);
     }
   } else if(action==='add_new_lot'){
     const newItem = {
-      c: exc.code, n: exc.name, cat: exc.cat||'', u: exc.unit, loc: exc.foundLoc||exc.origLoc,
-      exp: exc.foundExp||null, et: !!exc.foundExp, dte: exc.foundExp ? daysBetweenISO(exc.foundExp) : null,
-      qty: exc.foundQty, uc: 0, sv: 0,
+      c: excCopy.code, n: excCopy.name, cat: excCopy.cat||'', u: excCopy.unit, loc: excCopy.foundLoc||excCopy.origLoc,
+      exp: excCopy.foundExp||null, et: !!excCopy.foundExp, dte: excCopy.foundExp ? daysBetweenISO(excCopy.foundExp) : null,
+      qty: excCopy.foundQty, uc: 0, sv: 0,
       lmd: todayISO(), lmt: 'ปรับปรุง', dsm: 0
     };
-    BASE.push(newItem);
-    await sSet('seed_v1', BASE, true);
-    await logAudit(`เพิ่มสต็อกใหม่จาก Unknown LOT ${exc.code}`, '-', `${exc.foundExp||'-'} จำนวน=${exc.foundQty}`);
+    const mergedBase = await mutateDocAtomic('seed_v1', (latest)=>{
+      const list = latest || BASE || [];
+      list.push(newItem);
+      return list;
+    });
+    if(mergedBase!=null){
+      BASE = mergedBase;
+      await logAudit(`เพิ่มสต็อกใหม่จาก Unknown LOT ${excCopy.code}`, '-', `${excCopy.foundExp||'-'} จำนวน=${excCopy.foundQty}`);
+    }
   }
-  await logAudit(`ดำเนินการรายงานผิดปกติ (${action}) ${exc.code}`, 'pending', 'resolved');
+  await logAudit(`ดำเนินการรายงานผิดปกติ (${action}) ${excCopy.code}`, 'pending', 'resolved');
 }
 
 // ย้อนรายงานที่ "ยืนยันไปแล้ว" (resolved) กลับเป็น "รอดำเนินการ" (pending) พร้อมย้อนผลที่เคยอัปเดตเข้า Stock Balance ไปแล้ว
@@ -1157,31 +1222,63 @@ async function resolveException(roundId, excId, action, note){
 // หมายเหตุ: reverseException/editException ไม่ล็อกด้วย isRoundLocked โดยตั้งใจ
 // เพราะเป็นเครื่องมือแก้ไข "ความผิดพลาดที่ยืนยันไปแล้ว" ซึ่งอาจถูกพบหลังรอบปิดไปแล้วก็ได้ จึงต้องใช้งานได้เสมอ
 async function reverseException(roundId, excId){
-  const list = await loadExceptions(roundId);
-  const exc = list.find(e=>e.id===excId);
-  if(!exc || exc.status!=='resolved') return false;
-  const action = (exc.resolution||'').split(' — ')[0];
+  let excCopy = null;
+  const mergedExc0 = await mutateDocAtomic('exceptions:'+roundId, (latest)=>{
+    const list = latest || EXC_CACHE[roundId] || [];
+    const exc = list.find(e=>e.id===excId);
+    if(!exc || exc.status!=='resolved') return list;
+    excCopy = {...exc};
+    return list;
+  });
+  if(mergedExc0==null || !excCopy) return false;
+  EXC_CACHE[roundId] = mergedExc0;
+  const action = (excCopy.resolution||'').split(' — ')[0];
   if(action==='transfer_location'){
-    const rec = BASE.find(i=> i.c===exc.code && i.exp===exc.origExp && i.loc===exc.foundLoc);
-    if(rec){ const from=rec.loc; rec.loc = exc.origLoc; await sSet('seed_v1', BASE, true); await logAudit(`ย้อนกลับตำแหน่ง Stock Balance ${exc.code}`, from, exc.origLoc); }
+    let from = null;
+    const mergedBase = await mutateDocAtomic('seed_v1', (latest)=>{
+      const list = latest || BASE || [];
+      const rec = list.find(i=> i.c===excCopy.code && i.exp===excCopy.origExp && i.loc===excCopy.foundLoc);
+      if(rec){ from = rec.loc; rec.loc = excCopy.origLoc; }
+      return list;
+    });
+    if(mergedBase!=null){ BASE = mergedBase; if(from!=null) await logAudit(`ย้อนกลับตำแหน่ง Stock Balance ${excCopy.code}`, from, excCopy.origLoc); }
   } else if(action==='add_new_lot'){
-    const idx = BASE.findIndex(i=> i.c===exc.code && i.exp===exc.foundExp && i.loc===(exc.foundLoc||exc.origLoc) && i.qty===exc.foundQty && i.lmt==='ปรับปรุง');
-    if(idx>=0){ BASE.splice(idx,1); await sSet('seed_v1', BASE, true); await logAudit(`ลบสต็อกที่เพิ่มผิดจาก Unknown LOT ${exc.code}`, `${exc.foundExp||'-'} จำนวน=${exc.foundQty}`, '-'); }
+    let removed = false;
+    const mergedBase = await mutateDocAtomic('seed_v1', (latest)=>{
+      const list = latest || BASE || [];
+      const idx = list.findIndex(i=> i.c===excCopy.code && i.exp===excCopy.foundExp && i.loc===(excCopy.foundLoc||excCopy.origLoc) && i.qty===excCopy.foundQty && i.lmt==='ปรับปรุง');
+      if(idx>=0){ list.splice(idx,1); removed = true; }
+      return list;
+    });
+    if(mergedBase!=null){ BASE = mergedBase; if(removed) await logAudit(`ลบสต็อกที่เพิ่มผิดจาก Unknown LOT ${excCopy.code}`, `${excCopy.foundExp||'-'} จำนวน=${excCopy.foundQty}`, '-'); }
   }
-  exc.status = 'pending'; exc.resolution=''; exc.resolvedBy=null; exc.resolvedAt=null;
-  await saveExceptions(roundId);
-  await logAudit(`ย้อนสถานะรายงานผิดปกติกลับเป็นรอดำเนินการ (แก้ไขข้อมูล) ${exc.code}`, 'resolved', 'pending');
+  const mergedExc = await mutateDocAtomic('exceptions:'+roundId, (latest)=>{
+    const list = latest || EXC_CACHE[roundId] || [];
+    const exc = list.find(e=>e.id===excId);
+    if(exc){ exc.status='pending'; exc.resolution=''; exc.resolvedBy=null; exc.resolvedAt=null; }
+    return list;
+  });
+  if(mergedExc==null) return false;
+  EXC_CACHE[roundId] = mergedExc;
+  await logAudit(`ย้อนสถานะรายงานผิดปกติกลับเป็นรอดำเนินการ (แก้ไขข้อมูล) ${excCopy.code}`, 'resolved', 'pending');
   return true;
 }
 // แก้ไขข้อมูลที่แจ้งผิด (LOT/Location/จำนวน/หมายเหตุ) — ใช้ได้เฉพาะรายการที่ยังเป็น pending เท่านั้น
 async function editException(roundId, excId, updates){
-  const list = await loadExceptions(roundId);
-  const exc = list.find(e=>e.id===excId);
-  if(!exc || exc.status!=='pending') return false;
-  const before = `${exc.foundLoc} / ${exc.foundExp||'-'} / ${exc.foundQty}`;
-  Object.assign(exc, updates);
-  await saveExceptions(roundId);
-  await logAudit(`แก้ไขรายงานผิดปกติ ${exc.code}`, before, `${exc.foundLoc} / ${exc.foundExp||'-'} / ${exc.foundQty}`);
+  let before = null, code = null, ok = false;
+  const merged = await mutateDocAtomic('exceptions:'+roundId, (latest)=>{
+    const list = latest || EXC_CACHE[roundId] || [];
+    const exc = list.find(e=>e.id===excId);
+    if(!exc || exc.status!=='pending') return list;
+    before = `${exc.foundLoc} / ${exc.foundExp||'-'} / ${exc.foundQty}`;
+    Object.assign(exc, updates);
+    code = exc.code;
+    ok = true;
+    return list;
+  });
+  if(merged==null || !ok) return false;
+  EXC_CACHE[roundId] = merged;
+  await logAudit(`แก้ไขรายงานผิดปกติ ${code}`, before, `${updates.foundLoc} / ${updates.foundExp||'-'} / ${updates.foundQty}`);
   return true;
 }
 
@@ -1867,7 +1964,7 @@ async function renderMobile(container){
   const resultsBox = el('div','count-grid'); resultsBox.id='mobileResults';
   container.appendChild(resultsBox);
 
-  const detail = await loadDetail(ACTIVE_ROUND);
+  let detail = await loadDetail(ACTIVE_ROUND);
   const resultsEl = () => document.getElementById('mobileResults');
 
   function renderList(codeQuery, textQuery){
@@ -1959,6 +2056,7 @@ async function renderMobile(container){
         btnSave.disabled = true; btnSave.textContent = 'กำลังบันทึก...';
         const qty = +field.value || 0;
         await submitCount(ACTIVE_ROUND, item.id, qty);
+        detail = DETAIL_CACHE[ACTIVE_ROUND] || detail; // ดึงยอดล่าสุดจากเซิร์ฟเวอร์ (รวมรายการของคนอื่นที่เพิ่งบันทึกไปด้วย) มาใช้แสดงผลต่อ
         toast(`บันทึก ${item.code} = ${num(qty)} ${item.unit}`, 'success');
         renderList(document.getElementById('mobileSearchCode').value, document.getElementById('mobileSearchText').value);
       };
@@ -1991,6 +2089,7 @@ async function renderMobile(container){
         const subBtn = card.querySelector('.exc-submit');
         subBtn.disabled = true; subBtn.textContent = 'กำลังบันทึก...';
         await submitCount(ACTIVE_ROUND, item.id, remainQty);
+        detail = DETAIL_CACHE[ACTIVE_ROUND] || detail; // ดึงยอดล่าสุดจากเซิร์ฟเวอร์มาใช้แสดงผลต่อ (เช่นเดียวกับปุ่มบันทึกจำนวนปกติ)
         await reportException(ACTIVE_ROUND, {
           code:item.code, name:item.name, unit:item.unit, cat:item.cat,
           origLoc:item.loc, origExp:item.exp,
@@ -2624,11 +2723,22 @@ function renderImportConfirm(holder){
   if(box) box.remove();
   box = el('div','confirm-box'); box.id='importConfirmBox';
   const willReplace = importState.mode==='replace';
+  // เตือนก่อนยืนยัน ถ้าโหมด Replace จะทำให้ "ประเภทสินค้า" ที่มีอยู่เดิม (เช่น บรรจุภัณฑ์/วัตถุดิบ) บางประเภทหายไปทั้งหมด
+  // เพราะไฟล์ใหม่ไม่มีประเภทนั้นอยู่เลย — เกิดขึ้นได้ถ้าไฟล์ที่อัปโหลดเป็นแค่บางประเภท (เช่น อัปยอดเฉพาะบรรจุภัณฑ์)
+  // แต่เลือกโหมด Replace ซึ่งลบของเดิมทั้งหมดก่อนแทน ทำให้ประเภทอื่นที่ไม่ได้อยู่ในไฟล์นี้หายไปจากระบบทั้งหมด
+  let missingCats = [];
+  if(willReplace){
+    const oldCats = new Set(BASE.map(i=>i.cat).filter(Boolean));
+    const newCats = new Set(importState.items.map(i=>i.cat).filter(Boolean));
+    missingCats = [...oldCats].filter(c=>!newCats.has(c));
+  }
   box.innerHTML = `<div class="ct">ยืนยันการนำเข้า</div>
     <div class="cd">${willReplace
       ? `จะ<b>ลบ Stock Balance เดิมทั้งหมด (${BASE.length} รายการ)</b> แล้วแทนที่ด้วยข้อมูลใหม่ ${importState.items.length} รายการจากไฟล์ "${importState.filename}"`
       : `จะอัปเดต/เพิ่มรายการ Product+LOT+Location จำนวน ${importState.items.length} รายการจากไฟล์ "${importState.filename}" เข้ากับ Stock Balance เดิม (${BASE.length} รายการ) — รายการที่ไม่อยู่ในไฟล์ใหม่จะไม่ถูกแตะต้อง`}
-    </div>`;
+    </div>
+    ${missingCats.length>0 ? `<div class="cd" style="color:var(--red); margin-top:8px; font-weight:600;">⚠️ ไฟล์นี้ไม่มีประเภทสินค้า "${missingCats.join('", "')}" อยู่เลย — ถ้ายืนยันแบบ Replace ประเภทนี้จะหายไปจากระบบทั้งหมด (จะไม่มีให้เลือกในตัวกรอง "ประเภทสินค้า" อีกต่อไป) ถ้าไฟล์นี้เป็นข้อมูลแค่บางประเภท ให้ย้อนกลับไปเลือก "เพิ่ม/อัปเดตบางส่วน (Merge)" แทน</div>` : ''}
+  `;
   const btn = el('button','btn btn-danger','ยืนยันนำเข้า');
   btn.style.marginTop='10px';
   btn.onclick = async ()=>{
@@ -2643,21 +2753,28 @@ function renderImportConfirm(holder){
 async function doImport(){
   const before = BASE.length;
   let added=0, updated=0;
-  if(importState.mode==='replace'){
-    const oldKeys = new Set(BASE.map(i=>i.c+'|'+(i.lotKey||'')+'|'+i.loc));
-    BASE = importState.items.map(i=>({...i}));
-    BASE.forEach(i=>{ const k=i.c+'|'+(i.lotKey||'')+'|'+i.loc; if(oldKeys.has(k)) updated++; else added++; });
-  } else {
-    const key = i => i.c+'|'+(i.lotKey||'')+'|'+i.loc;
-    const map = new Map(BASE.map(i=>[key(i), i]));
-    importState.items.forEach(ni=>{
-      const k = key(ni);
-      if(map.has(k)) updated++; else added++;
-      map.set(k, ni);
-    });
-    BASE = Array.from(map.values());
-  }
-  await sSet('seed_v1', BASE, true);
+  // ใช้ mutateDocAtomic อ่านยอด Stock Balance ล่าสุดจากเซิร์ฟเวอร์ก่อนแทนที่/รวมข้อมูลเสมอ
+  // ป้องกันกรณีมีคนอื่นเพิ่งนำเข้าไฟล์อื่น (เช่น อีกประเภทสินค้า) เข้าไปพร้อมๆ กัน แล้วโดนเขียนทับด้วย BASE ที่ค้างอยู่ในเครื่องนี้
+  const merged = await mutateDocAtomic('seed_v1', (latest)=>{
+    const serverBase = latest || BASE || [];
+    if(importState.mode==='replace'){
+      const oldKeys = new Set(serverBase.map(i=>i.c+'|'+(i.lotKey||'')+'|'+i.loc));
+      const next = importState.items.map(i=>({...i}));
+      next.forEach(i=>{ const k=i.c+'|'+(i.lotKey||'')+'|'+i.loc; if(oldKeys.has(k)) updated++; else added++; });
+      return next;
+    } else {
+      const key = i => i.c+'|'+(i.lotKey||'')+'|'+i.loc;
+      const map = new Map(serverBase.map(i=>[key(i), i]));
+      importState.items.forEach(ni=>{
+        const k = key(ni);
+        if(map.has(k)) updated++; else added++;
+        map.set(k, ni);
+      });
+      return Array.from(map.values());
+    }
+  });
+  if(merged==null) return; // การบันทึกล้มเหลว (toast แจ้งไปแล้ว) — ไม่ต้องอัปเดตสถานะอื่นต่อ
+  BASE = merged;
   SEED_META = {filename: importState.filename, importedAt: nowStr(), importedBy: currentUser, itemCount: BASE.length, mode: importState.mode};
   await sSet('seed_meta', SEED_META, true);
   IMPORT_HISTORY.unshift({id: Math.random().toString(36).slice(2,9), ...SEED_META, rawRows: importState.rows.length, added, updated});
