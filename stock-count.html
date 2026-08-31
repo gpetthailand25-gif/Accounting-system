@@ -1126,6 +1126,53 @@ async function loadExceptions(roundId){
 }
 async function saveExceptions(roundId){ await sSet('exceptions:'+roundId, EXC_CACHE[roundId], true); }
 
+// เหมือน mutateDetailAtomic — กัน "แจ้งพบผิดตำแหน่ง/ผิด LOT" จากหลายคนพร้อมกันเขียนทับกันเอง
+async function mutateExceptionsAtomic(roundId, mutatorFn){
+  const ref = db.collection('kv_store').doc('exceptions:'+roundId);
+  let result;
+  try{
+    await db.runTransaction(async (tx)=>{
+      const snap = await tx.get(ref);
+      let latest = [];
+      if(snap.exists){
+        const v = snap.data().value;
+        latest = v ? JSON.parse(v) : [];
+      }
+      result = mutatorFn(latest);
+      tx.set(ref, { value: JSON.stringify(latest), updatedAt: Date.now() });
+      EXC_CACHE[roundId] = latest;
+    });
+    return result;
+  }catch(e){
+    console.error('mutateExceptionsAtomic failed', roundId, e);
+    toast('บันทึกรายงานผิดปกติไม่สำเร็จ: '+(e.code||e.message), 'error');
+    return null;
+  }
+}
+// เหมือนกัน แต่สำหรับ Stock Balance (seed_v1) ที่ resolveException/reverseException แก้ไข
+async function mutateBaseAtomic(mutatorFn){
+  const ref = db.collection('kv_store').doc('seed_v1');
+  let result;
+  try{
+    await db.runTransaction(async (tx)=>{
+      const snap = await tx.get(ref);
+      let latest = [];
+      if(snap.exists){
+        const v = snap.data().value;
+        latest = v ? JSON.parse(v) : [];
+      }
+      result = mutatorFn(latest);
+      tx.set(ref, { value: JSON.stringify(latest), updatedAt: Date.now() });
+      BASE = latest;
+    });
+    return result;
+  }catch(e){
+    console.error('mutateBaseAtomic failed', e);
+    toast('บันทึก Stock Balance ไม่สำเร็จ: '+(e.code||e.message), 'error');
+    return null;
+  }
+}
+
 // รายการ "เหตุผล" ของผลต่าง — เก็บใน Firestore แบบ shared เพื่อให้ทุกคนเห็นรายการเดียวกัน และหัวหน้างานเพิ่ม/แก้ไขได้เอง
 let REASON_LIST = null;
 const DEFAULT_REASONS = ['สูญเสีย','เสียหาย','ชั่งน้ำหนักผิด','เบิกไม่ได้ตัด','รับสินค้าไม่ได้เข้า','นับผิด','อื่น ๆ'];
@@ -1159,15 +1206,14 @@ function applyExceptionMatches(detail, exceptions){
 
 async function reportException(roundId, payload){
   if(isRoundLocked(roundId)){ toast('รอบนี้ปิดแล้ว ไม่สามารถแจ้งรายงานผิดปกติเพิ่มได้','error'); return null; }
-  const list = await loadExceptions(roundId);
   const rec = {
     id: Math.random().toString(36).slice(2,9),
     ...payload,
     reportedBy: currentUser, reportedAt: nowStr(),
     status: 'pending', resolution: ''
   };
-  list.unshift(rec);
-  await saveExceptions(roundId);
+  const ok = await mutateExceptionsAtomic(roundId, latest=>{ latest.unshift(rec); return rec; });
+  if(!ok) return null;
   await logAudit(
     `แจ้งพบผิด${payload.type==='location_mismatch'?'ตำแหน่ง':'LOT'} ${payload.code}`,
     '-', `${payload.foundLoc||''} ${payload.foundExp||''} จำนวน=${payload.foundQty}`
@@ -1177,22 +1223,25 @@ async function reportException(roundId, payload){
 
 async function resolveException(roundId, excId, action, note){
   if(isRoundLocked(roundId)){ toast('รอบนี้ปิดแล้ว ไม่สามารถดำเนินการรายงานผิดปกติได้','error'); return; }
-  const list = await loadExceptions(roundId);
-  const exc = list.find(e=>e.id===excId);
+  const exc = await mutateExceptionsAtomic(roundId, latest=>{
+    const e = latest.find(x=>x.id===excId);
+    if(!e) return null;
+    e.status = 'resolved';
+    e.resolution = action + (note ? ' — '+note : '');
+    e.resolvedBy = currentUser; e.resolvedAt = nowStr();
+    return e;
+  });
   if(!exc) return;
-  exc.status = 'resolved';
-  exc.resolution = action + (note ? ' — '+note : '');
-  exc.resolvedBy = currentUser; exc.resolvedAt = nowStr();
-  await saveExceptions(roundId);
 
   if(action==='transfer_location'){
-    const rec = BASE.find(i=> i.c===exc.code && i.exp===exc.origExp && i.loc===exc.origLoc);
-    if(rec){
-      const oldLoc = rec.loc;
+    const oldLoc = await mutateBaseAtomic(latest=>{
+      const rec = latest.find(i=> i.c===exc.code && i.exp===exc.origExp && i.loc===exc.origLoc);
+      if(!rec) return null;
+      const from = rec.loc;
       rec.loc = exc.foundLoc;
-      await sSet('seed_v1', BASE, true);
-      await logAudit(`แก้ไขตำแหน่ง Stock Balance ${exc.code}`, oldLoc, exc.foundLoc);
-    }
+      return from;
+    });
+    if(oldLoc!=null) await logAudit(`แก้ไขตำแหน่ง Stock Balance ${exc.code}`, oldLoc, exc.foundLoc);
   } else if(action==='add_new_lot'){
     const newItem = {
       c: exc.code, n: exc.name, cat: exc.cat||'', u: exc.unit, loc: exc.foundLoc||exc.origLoc,
@@ -1200,8 +1249,7 @@ async function resolveException(roundId, excId, action, note){
       qty: exc.foundQty, uc: 0, sv: 0,
       lmd: todayISO(), lmt: 'ปรับปรุง', dsm: 0
     };
-    BASE.push(newItem);
-    await sSet('seed_v1', BASE, true);
+    await mutateBaseAtomic(latest=>{ latest.push(newItem); return newItem; });
     await logAudit(`เพิ่มสต็อกใหม่จาก Unknown LOT ${exc.code}`, '-', `${exc.foundExp||'-'} จำนวน=${exc.foundQty}`);
   }
   await logAudit(`ดำเนินการรายงานผิดปกติ (${action}) ${exc.code}`, 'pending', 'resolved');
@@ -1212,30 +1260,48 @@ async function resolveException(roundId, excId, action, note){
 // หมายเหตุ: reverseException/editException ไม่ล็อกด้วย isRoundLocked โดยตั้งใจ
 // เพราะเป็นเครื่องมือแก้ไข "ความผิดพลาดที่ยืนยันไปแล้ว" ซึ่งอาจถูกพบหลังรอบปิดไปแล้วก็ได้ จึงต้องใช้งานได้เสมอ
 async function reverseException(roundId, excId){
-  const list = await loadExceptions(roundId);
-  const exc = list.find(e=>e.id===excId);
-  if(!exc || exc.status!=='resolved') return false;
+  const cur = (EXC_CACHE[roundId]||(await loadExceptions(roundId))).find(e=>e.id===excId);
+  if(!cur || cur.status!=='resolved') return false;
+  const exc = cur;
   const action = (exc.resolution||'').split(' — ')[0];
   if(action==='transfer_location'){
-    const rec = BASE.find(i=> i.c===exc.code && i.exp===exc.origExp && i.loc===exc.foundLoc);
-    if(rec){ const from=rec.loc; rec.loc = exc.origLoc; await sSet('seed_v1', BASE, true); await logAudit(`ย้อนกลับตำแหน่ง Stock Balance ${exc.code}`, from, exc.origLoc); }
+    const from = await mutateBaseAtomic(latest=>{
+      const rec = latest.find(i=> i.c===exc.code && i.exp===exc.origExp && i.loc===exc.foundLoc);
+      if(!rec) return null;
+      const f = rec.loc;
+      rec.loc = exc.origLoc;
+      return f;
+    });
+    if(from!=null) await logAudit(`ย้อนกลับตำแหน่ง Stock Balance ${exc.code}`, from, exc.origLoc);
   } else if(action==='add_new_lot'){
-    const idx = BASE.findIndex(i=> i.c===exc.code && i.exp===exc.foundExp && i.loc===(exc.foundLoc||exc.origLoc) && i.qty===exc.foundQty && i.lmt==='ปรับปรุง');
-    if(idx>=0){ BASE.splice(idx,1); await sSet('seed_v1', BASE, true); await logAudit(`ลบสต็อกที่เพิ่มผิดจาก Unknown LOT ${exc.code}`, `${exc.foundExp||'-'} จำนวน=${exc.foundQty}`, '-'); }
+    const removed = await mutateBaseAtomic(latest=>{
+      const idx = latest.findIndex(i=> i.c===exc.code && i.exp===exc.foundExp && i.loc===(exc.foundLoc||exc.origLoc) && i.qty===exc.foundQty && i.lmt==='ปรับปรุง');
+      if(idx<0) return null;
+      latest.splice(idx,1);
+      return true;
+    });
+    if(removed) await logAudit(`ลบสต็อกที่เพิ่มผิดจาก Unknown LOT ${exc.code}`, `${exc.foundExp||'-'} จำนวน=${exc.foundQty}`, '-');
   }
-  exc.status = 'pending'; exc.resolution=''; exc.resolvedBy=null; exc.resolvedAt=null;
-  await saveExceptions(roundId);
+  await mutateExceptionsAtomic(roundId, latest=>{
+    const e = latest.find(x=>x.id===excId);
+    if(e){ e.status = 'pending'; e.resolution=''; e.resolvedBy=null; e.resolvedAt=null; }
+    return e;
+  });
   await logAudit(`ย้อนสถานะรายงานผิดปกติกลับเป็นรอดำเนินการ (แก้ไขข้อมูล) ${exc.code}`, 'resolved', 'pending');
   return true;
 }
 // แก้ไขข้อมูลที่แจ้งผิด (LOT/Location/จำนวน/หมายเหตุ) — ใช้ได้เฉพาะรายการที่ยังเป็น pending เท่านั้น
 async function editException(roundId, excId, updates){
-  const list = await loadExceptions(roundId);
-  const exc = list.find(e=>e.id===excId);
-  if(!exc || exc.status!=='pending') return false;
-  const before = `${exc.foundLoc} / ${exc.foundExp||'-'} / ${exc.foundQty}`;
-  Object.assign(exc, updates);
-  await saveExceptions(roundId);
+  const cur = (EXC_CACHE[roundId]||(await loadExceptions(roundId))).find(e=>e.id===excId);
+  if(!cur || cur.status!=='pending') return false;
+  const before = `${cur.foundLoc} / ${cur.foundExp||'-'} / ${cur.foundQty}`;
+  const exc = await mutateExceptionsAtomic(roundId, latest=>{
+    const e = latest.find(x=>x.id===excId);
+    if(!e || e.status!=='pending') return null;
+    Object.assign(e, updates);
+    return e;
+  });
+  if(!exc) return false;
   await logAudit(`แก้ไขรายงานผิดปกติ ${exc.code}`, before, `${exc.foundLoc} / ${exc.foundExp||'-'} / ${exc.foundQty}`);
   return true;
 }
@@ -2886,7 +2952,28 @@ function setupDrawer(){
   document.getElementById('navOverlay').onclick = closeDrawer;
 }
 
+// render() ล้าง #content แล้วสร้างใหม่ทั้งหมด — ถ้ามีการเรียก render() ซ้อนกันสองรอบพร้อมกัน
+// (เช่น ผู้ใช้คลิกเปลี่ยนแท็บ ระหว่างที่ listener แบบเรียลไทม์เพิ่งยิง render() เข้ามาพอดีเพราะมีคนอื่น
+// บันทึกข้อมูลนับ) รอบที่สองจะไปเคลียร์ #content ทิ้งกลางคันในขณะที่รอบแรกยังทำงาน (await) ไม่เสร็จ
+// ทำให้ผลลัพธ์ของรอบแรกไปต่อท้าย section ที่หลุดออกจากหน้าจอไปแล้ว (มองไม่เห็น) — นี่คือสาเหตุที่
+// บางหน้าดู "ไม่มีข้อมูล" และตัวเลขบางหน้ากระโดดไปมา ไม่เกี่ยวกับข้อมูลเฉพาะของแต่ละยูสเซอร์
+// แก้โดยล็อกให้ render() ทำงานได้ทีละรอบ ถ้ามีการเรียกซ้อนเข้ามาระหว่างที่ยังทำงานอยู่ จะแค่จด
+// ไว้ว่ามีของใหม่เข้ามา แล้วรัน render() อีกรอบเดียวหลังจากรอบปัจจุบันเสร็จ (ไม่ซ้อนกัน)
+let renderBusy = false;
+let renderPending = false;
 async function render(){
+  if(renderBusy){ renderPending = true; return; }
+  renderBusy = true;
+  try{
+    do{
+      renderPending = false;
+      await renderOnce();
+    } while(renderPending);
+  } finally {
+    renderBusy = false;
+  }
+}
+async function renderOnce(){
   renderNav();
   document.getElementById('fLocation').value = state.location;
   document.getElementById('fCategory').value = state.category;
