@@ -1699,66 +1699,59 @@ async function renderExecSummary(container){
   // แล้วนับ/สรุปเป็น "1 SKU" เสมอ ไม่ใช่นับทีละแถว Location/LOT เหมือนหน้าอื่นๆ ในระบบ
   const skuMap = new Map();
   items.forEach(i=>{
-    if(!skuMap.has(i.c)) skuMap.set(i.c, {code:i.c, name:i.n, cat:i.cat, qty:0, value:0, hasActive:false, hasExpiry:false, minDte:null, unitCost:i.uc||0});
+    if(!skuMap.has(i.c)) skuMap.set(i.c, {code:i.c, name:i.n, cat:i.cat, qty:0, value:0, hasActive:false});
     const g = skuMap.get(i.c);
     g.qty += (i.qty||0);
     g.value += (i.sv||0);
     if(i.active!==false) g.hasActive = true; // ถือว่า SKU ยัง active ถ้ามีอย่างน้อย 1 ตำแหน่ง/LOT ที่ active
-    if(i.et){
-      g.hasExpiry = true;
-      if(i.dte!=null && (g.minDte===null || i.dte<g.minDte)) g.minDte = i.dte; // ใช้ LOT ที่ใกล้หมดอายุที่สุดของ SKU นั้นเป็นตัวกำหนดความเสี่ยง
-    }
   });
-  const skus = Array.from(skuMap.values()).map(g=>{
-    let expiryBucket = 'none';
-    if(g.hasExpiry && g.minDte!=null){
-      if(g.minDte<0) expiryBucket='expired';
-      else if(g.minDte<=30) expiryBucket='near30';
-      else if(g.minDte<=60) expiryBucket='near60';
-      else if(g.minDte<=90) expiryBucket='near90';
-    }
-    return {...g, active: g.hasActive, expiryBucket};
-  });
+  const skus = Array.from(skuMap.values()).map(g=> ({...g, active: g.hasActive}));
 
   const totalValue = skus.reduce((a,g)=>a+g.value,0);
   const activeSKU = skus.filter(g=>g.active);
   const inactiveSKU = skus.filter(g=>!g.active); // SKU ที่ไม่ active เลยแม้แต่ตำแหน่ง/LOT เดียว
-  const expiredSKU = skus.filter(g=>g.expiryBucket==='expired');
-  const near30SKU = skus.filter(g=>g.expiryBucket==='near30');
-  const near60SKU = skus.filter(g=>g.expiryBucket==='near60');
-  const near90SKU = skus.filter(g=>g.expiryBucket==='near90');
   const sumVal = arr => arr.reduce((a,g)=>a+g.value,0);
 
+  // ความเสี่ยงด้านวันหมดอายุ: นับเป็น "จำนวนแถว LOT/ตำแหน่งที่หมดอายุจริง" (เหมือนหน้า "สินค้าใกล้หมดอายุ")
+  // ไม่ใช่นับแบบรวมเป็น SKU เหมือนส่วนอื่นของหน้านี้ — เพราะ 1 SKU อาจมีหลาย LOT ที่หมดอายุพร้อมกัน ต้องนับแยกทีละ LOT/ตำแหน่ง
+  // และมูลค่าคือมูลค่าเฉพาะของ LOT ที่หมดอายุจริงเท่านั้น ไม่รวมมูลค่า LOT อื่นของ SKU เดียวกันที่ยังไม่หมดอายุ
+  const expiryItems = items.filter(i=>i.et);
+  const expiredRows = expiryItems.filter(i=>i.dte!=null && i.dte<0);
+  const near30Rows = expiryItems.filter(i=>i.dte!=null && i.dte>=0 && i.dte<=30);
+  const near60Rows = expiryItems.filter(i=>i.dte!=null && i.dte>30 && i.dte<=60);
+  const near90Rows = expiryItems.filter(i=>i.dte!=null && i.dte>60 && i.dte<=90);
+  const sumRowVal = arr => arr.reduce((a,i)=>a+i.sv,0);
+
   container.appendChild(printHeader('สรุปรายงานสต็อกสำหรับผู้บริหาร (Executive Summary) — สรุปตามจำนวน SKU'));
-  const titleRow = el('div','section-title','🚦 สรุปสถานะโดยรวม <span class="mini" style="margin-left:6px; text-transform:none; font-weight:400;">คำนวณจากจำนวน SKU ทั้งหมด (ไม่แยกตาม Location/LOT)</span><div class="line"></div>');
+  const titleRow = el('div','section-title','🚦 สรุปสถานะโดยรวม <span class="mini" style="margin-left:6px; text-transform:none; font-weight:400;">สินค้าหมดอายุนับตามจำนวนแถว LOT/ตำแหน่ง · สินค้าไม่เคลื่อนไหวนับตามจำนวน SKU</span><div class="line"></div>');
   container.appendChild(titleRow);
   titleRow.appendChild(printButton('พิมพ์รายงานผู้บริหารเป็น PDF'));
 
   // แถวสถานะใหญ่ ✅/⚠️/❌ — ดูปราดเดียวเข้าใจ ไม่ต้องอ่านตัวเลขละเอียด
   const statusRow = el('div','bucket-row');
   statusRow.appendChild(statusChip(
-    expiredSKU.length===0 ? 'ok' : 'urgent',
-    expiredSKU.length===0 ? '✅' : '❌',
+    expiredRows.length===0 ? 'ok' : 'urgent',
+    expiredRows.length===0 ? '✅' : '❌',
     'สินค้าหมดอายุ',
-    expiredSKU.length===0 ? 'ไม่มี SKU หมดอายุ' : `${num(expiredSKU.length)} SKU (${money(sumVal(expiredSKU))})`
+    expiredRows.length===0 ? 'ไม่มีรายการหมดอายุ' : `${num(expiredRows.length)} รายการ (${money(sumRowVal(expiredRows))})`
   ));
   statusRow.appendChild(statusChip(
-    near30SKU.length===0 ? 'ok' : 'warn',
-    near30SKU.length===0 ? '✅' : '⚠️',
+    near30Rows.length===0 ? 'ok' : 'warn',
+    near30Rows.length===0 ? '✅' : '⚠️',
     'ใกล้หมดอายุ (30 วัน)',
-    near30SKU.length===0 ? 'ไม่มี SKU ใกล้หมดอายุ' : `${num(near30SKU.length)} SKU (${money(sumVal(near30SKU))})`
+    near30Rows.length===0 ? 'ไม่มีรายการใกล้หมดอายุ' : `${num(near30Rows.length)} รายการ (${money(sumRowVal(near30Rows))})`
   ));
   statusRow.appendChild(statusChip(
-    near60SKU.length===0 ? 'ok' : 'watch',
-    near60SKU.length===0 ? '✅' : '👀',
+    near60Rows.length===0 ? 'ok' : 'watch',
+    near60Rows.length===0 ? '✅' : '👀',
     'ใกล้หมดอายุ (60 วัน)',
-    near60SKU.length===0 ? 'ไม่มี SKU ใกล้หมดอายุ' : `${num(near60SKU.length)} SKU (${money(sumVal(near60SKU))})`
+    near60Rows.length===0 ? 'ไม่มีรายการใกล้หมดอายุ' : `${num(near60Rows.length)} รายการ (${money(sumRowVal(near60Rows))})`
   ));
   statusRow.appendChild(statusChip(
-    near90SKU.length===0 ? 'ok' : 'watch',
-    near90SKU.length===0 ? '✅' : '👀',
+    near90Rows.length===0 ? 'ok' : 'watch',
+    near90Rows.length===0 ? '✅' : '👀',
     'ใกล้หมดอายุ (90 วัน)',
-    near90SKU.length===0 ? 'ไม่มี SKU ใกล้หมดอายุ' : `${num(near90SKU.length)} SKU (${money(sumVal(near90SKU))})`
+    near90Rows.length===0 ? 'ไม่มีรายการใกล้หมดอายุ' : `${num(near90Rows.length)} รายการ (${money(sumRowVal(near90Rows))})`
   ));
   statusRow.appendChild(statusChip(
     inactiveSKU.length===0 ? 'ok' : 'warn',
@@ -1776,16 +1769,16 @@ async function renderExecSummary(container){
   grid.appendChild(kpiCard('❌ มูลค่าสินค้าไม่ Active', money(sumVal(inactiveSKU)),'','red'));
   container.appendChild(grid);
 
-  container.appendChild(el('div','section-title','⏰ ความเสี่ยงด้านวันหมดอายุ (ทุกประเภทยกเว้นบรรจุภัณฑ์) <span class="mini" style="margin-left:6px; text-transform:none; font-weight:400;">1 SKU นับตาม LOT ที่ใกล้หมดอายุที่สุดของ SKU นั้น</span><div class="line"></div>'));
+  container.appendChild(el('div','section-title','⏰ ความเสี่ยงด้านวันหมดอายุ (ทุกประเภทยกเว้นบรรจุภัณฑ์) <span class="mini" style="margin-left:6px; text-transform:none; font-weight:400;">นับเป็นจำนวนแถว LOT/ตำแหน่งที่หมดอายุจริง (เหมือนหน้า "สินค้าใกล้หมดอายุ") ไม่ใช่นับรวมเป็น SKU</span><div class="line"></div>'));
   const gridExp = el('div','kpi-grid');
-  gridExp.appendChild(kpiCard((expiredSKU.length===0?'✅':'❌')+' มูลค่า SKU หมดอายุแล้ว', money(sumVal(expiredSKU)),'','red'));
-  gridExp.appendChild(kpiCard((expiredSKU.length===0?'✅':'❌')+' จำนวน SKU หมดอายุแล้ว', num(expiredSKU.length),'','red'));
-  gridExp.appendChild(kpiCard((near30SKU.length===0?'✅':'⚠️')+' มูลค่า SKU ใกล้หมดอายุ (≤30 วัน)', money(sumVal(near30SKU)),'','amber'));
-  gridExp.appendChild(kpiCard((near30SKU.length===0?'✅':'⚠️')+' จำนวน SKU ใกล้หมดอายุ (≤30 วัน)', num(near30SKU.length),'','amber'));
-  gridExp.appendChild(kpiCard((near60SKU.length===0?'✅':'👀')+' มูลค่า SKU ใกล้หมดอายุ (31-60 วัน)', money(sumVal(near60SKU)),'','blue'));
-  gridExp.appendChild(kpiCard((near60SKU.length===0?'✅':'👀')+' จำนวน SKU ใกล้หมดอายุ (31-60 วัน)', num(near60SKU.length),'','blue'));
-  gridExp.appendChild(kpiCard((near90SKU.length===0?'✅':'👀')+' มูลค่า SKU ใกล้หมดอายุ (61-90 วัน)', money(sumVal(near90SKU)),'','blue'));
-  gridExp.appendChild(kpiCard((near90SKU.length===0?'✅':'👀')+' จำนวน SKU ใกล้หมดอายุ (61-90 วัน)', num(near90SKU.length),'','blue'));
+  gridExp.appendChild(kpiCard((expiredRows.length===0?'✅':'❌')+' มูลค่ารายการหมดอายุแล้ว', money(sumRowVal(expiredRows)),'','red'));
+  gridExp.appendChild(kpiCard((expiredRows.length===0?'✅':'❌')+' จำนวนรายการหมดอายุแล้ว', num(expiredRows.length),'','red'));
+  gridExp.appendChild(kpiCard((near30Rows.length===0?'✅':'⚠️')+' มูลค่ารายการใกล้หมดอายุ (≤30 วัน)', money(sumRowVal(near30Rows)),'','amber'));
+  gridExp.appendChild(kpiCard((near30Rows.length===0?'✅':'⚠️')+' จำนวนรายการใกล้หมดอายุ (≤30 วัน)', num(near30Rows.length),'','amber'));
+  gridExp.appendChild(kpiCard((near60Rows.length===0?'✅':'👀')+' มูลค่ารายการใกล้หมดอายุ (31-60 วัน)', money(sumRowVal(near60Rows)),'','blue'));
+  gridExp.appendChild(kpiCard((near60Rows.length===0?'✅':'👀')+' จำนวนรายการใกล้หมดอายุ (31-60 วัน)', num(near60Rows.length),'','blue'));
+  gridExp.appendChild(kpiCard((near90Rows.length===0?'✅':'👀')+' มูลค่ารายการใกล้หมดอายุ (61-90 วัน)', money(sumRowVal(near90Rows)),'','blue'));
+  gridExp.appendChild(kpiCard((near90Rows.length===0?'✅':'👀')+' จำนวนรายการใกล้หมดอายุ (61-90 วัน)', num(near90Rows.length),'','blue'));
   container.appendChild(gridExp);
 
   container.appendChild(el('div','section-title','📉 สินค้าไม่เคลื่อนไหว (Active = N) <span class="mini" style="margin-left:6px; text-transform:none; font-weight:400;">SKU ที่ไม่ active แม้แต่ตำแหน่ง/LOT เดียว</span><div class="line"></div>'));
@@ -1923,7 +1916,23 @@ let expiryLevelFilter = null; // null = ทั้งหมด, หรือ 'exp
 function renderExpiry(container){
   // ทุกประเภทที่มีวันหมดอายุ (LOT = วันหมดอายุ) ยกเว้น "บรรจุภัณฑ์" ที่ไม่ต้องสนใจ LOT/วันหมดอายุ
   const items = filterBase(BASE).filter(i=>i.et);
-  container.appendChild(el('div','section-title','Expiry Monitoring <span style="color:var(--text-faint); text-transform:none; font-weight:400;">— ทุกประเภทที่มีวันหมดอายุ (ไม่รวมบรรจุภัณฑ์) · คลิกที่การ์ดเพื่อกรองระดับ</span><div class="line"></div>'));
+  const rangeLabels = {expired:'หมดอายุแล้ว', d7:'ภายใน 7 วัน', d30:'ภายใน 30 วัน', d60:'ภายใน 60 วัน', d90:'ภายใน 90 วัน'};
+  const printTitleSuffix = expiryLevelFilter ? ` — เฉพาะช่วง "${rangeLabels[expiryLevelFilter]}"` : ' — ทุกช่วง';
+  container.appendChild(printHeader('รายงานสินค้าใกล้หมดอายุ (Expiry Monitoring)'+printTitleSuffix));
+  const expTitleRow = el('div','section-title','Expiry Monitoring <span style="color:var(--text-faint); text-transform:none; font-weight:400;">— ทุกประเภทที่มีวันหมดอายุ (ไม่รวมบรรจุภัณฑ์) · คลิกที่การ์ดเพื่อกรองระดับ</span><div class="line"></div>');
+  container.appendChild(expTitleRow);
+
+  // ตัวเลือก "ช่วงที่จะพิมพ์" — ใช้ตัวกรอง expiryLevelFilter เดียวกับการคลิกการ์ด (การ์ด/ดรอปดาวน์นี้ sync กันเสมอ)
+  // เลือกช่วงไหน ตารางและ PDF ที่พิมพ์ออกมาจะมีเฉพาะรายการของช่วงนั้นเท่านั้น
+  const printOptWrap = el('div','no-print'); printOptWrap.style.cssText='display:inline-flex; align-items:center; gap:8px; margin-left:10px;';
+  const printOptLabel = el('span','mini','🖨️ ช่วงที่จะพิมพ์:');
+  const printRangeSel = document.createElement('select'); printRangeSel.className='reason-select';
+  [['','ทั้งหมด'],['expired','หมดอายุแล้ว'],['d7','ภายใน 7 วัน'],['d30','ภายใน 30 วัน'],['d60','ภายใน 60 วัน'],['d90','ภายใน 90 วัน']]
+    .forEach(([val,lbl])=>{ const o=document.createElement('option'); o.value=val; o.textContent=lbl; if((expiryLevelFilter||'')===val) o.selected=true; printRangeSel.appendChild(o); });
+  printRangeSel.onchange = ()=>{ expiryLevelFilter = printRangeSel.value || null; render(); };
+  printOptWrap.appendChild(printOptLabel); printOptWrap.appendChild(printRangeSel);
+  expTitleRow.appendChild(printOptWrap);
+  expTitleRow.appendChild(printButton('พิมพ์รายงานใกล้หมดอายุเป็น PDF'));
   const buckets={expired:[],d7:[],d30:[],d60:[],d90:[]};
   items.forEach(i=>{ const d=i.dte; if(d==null) return;
     if(d<0) buckets.expired.push(i); else if(d<=7) buckets.d7.push(i); else if(d<=30) buckets.d30.push(i); else if(d<=60) buckets.d60.push(i); else if(d<=90) buckets.d90.push(i);
@@ -1942,12 +1951,14 @@ function renderExpiry(container){
     clearBtn.onclick = ()=>{ expiryLevelFilter=null; render(); };
     container.appendChild(clearBtn);
   }
+  // ระดับความเร่งด่วน (urgent/warn/watch) แปลงเป็นค่าลำดับตัวเลขไว้ล่วงหน้า เพื่อให้คอลัมน์ "ระดับ" กดเรียงลำดับได้เหมือนคอลัมน์อื่น
+  const levelRank = i => i.dte<0 ? 0 : (i.dte<=7 ? 1 : (i.dte<=30 ? 2 : (i.dte<=60 ? 3 : 4)));
   let all = expiryLevelFilter ? buckets[expiryLevelFilter] : [...buckets.expired,...buckets.d7,...buckets.d30,...buckets.d60,...buckets.d90];
-  all = applySorting(all, 'expiry', {c:i=>i.c,n:i=>i.n,exp:i=>i.exp||'',dte:i=>i.dte,loc:i=>i.loc,qty:i=>i.qty,u:i=>i.u,sv:i=>i.sv});
+  all = applySorting(all, 'expiry', {c:i=>i.c,n:i=>i.n,exp:i=>i.exp||'',dte:i=>i.dte,loc:i=>i.loc,qty:i=>i.qty,u:i=>i.u,sv:i=>i.sv,lvl:levelRank});
   if(!getSort('expiry').key) all = all.slice().sort((a,b)=>a.dte-b.dte);
   container.appendChild(el('div','section-title','รายละเอียด <span class="mini" style="text-transform:none; font-weight:400;">คลิกหัวตารางเพื่อเรียงลำดับ</span><div class="line"></div>'));
   const wrap=el('div','table-wrap'); const t=el('table');
-  t.innerHTML=`<thead><tr>${sortableTh('รหัส','c','expiry')}${sortableTh('ชื่อสินค้า','n','expiry')}${sortableTh('LOT/วันหมดอายุ','exp','expiry')}${sortableTh('เหลือ(วัน)','dte','expiry',true)}${sortableTh('Location','loc','expiry')}${sortableTh('จำนวน','qty','expiry',true)}${sortableTh('หน่วย','u','expiry')}${sortableTh('มูลค่า','sv','expiry',true)}<th>ระดับ</th></tr></thead>`;
+  t.innerHTML=`<thead><tr>${sortableTh('รหัส','c','expiry')}${sortableTh('ชื่อสินค้า','n','expiry')}${sortableTh('LOT/วันหมดอายุ','exp','expiry')}${sortableTh('เหลือ(วัน)','dte','expiry',true)}${sortableTh('Location','loc','expiry')}${sortableTh('จำนวน','qty','expiry',true)}${sortableTh('หน่วย','u','expiry')}${sortableTh('มูลค่า','sv','expiry',true)}${sortableTh('ระดับ','lvl','expiry')}</tr></thead>`;
   const tb=el('tbody');
   all.forEach(i=>{
     let lvl='watch',lbl='ปกติ';
@@ -1967,7 +1978,10 @@ function renderExpiry(container){
 function renderNonMoving(container){
   const items = filterBase(BASE);
   const inactive = items.filter(i=>i.active===false).sort((a,b)=>b.sv-a.sv);
-  container.appendChild(el('div','section-title','สินค้าไม่เคลื่อนไหว (Active = N)<div class="line"></div>'));
+  container.appendChild(printHeader('รายงานสินค้าไม่เคลื่อนไหว (Non-Moving Report)'));
+  const nmTitleRow = el('div','section-title','สินค้าไม่เคลื่อนไหว (Active = N)<div class="line"></div>');
+  container.appendChild(nmTitleRow);
+  nmTitleRow.appendChild(printButton('พิมพ์รายงานไม่เคลื่อนไหวเป็น PDF'));
   const row=el('div','bucket-row');
   const b=el('div','bucket urgent');
   b.appendChild(el('div','n',num(inactive.length)));
@@ -2674,6 +2688,7 @@ async function renderReview(container){
 // ============================================================
 async function renderVariance(container){
   if(!ACTIVE_ROUND){ container.appendChild(emptyState('ยังไม่มีรอบนับ','')); return; }
+  const round = ROUNDS.find(r=>r.id===ACTIVE_ROUND);
   const exceptions = await loadExceptions(ACTIVE_ROUND);
   const detail = applyExceptionMatches(filterDetail(await loadDetail(ACTIVE_ROUND)), exceptions);
   const counted = detail.filter(i=>i.status!=='uncounted');
@@ -2681,7 +2696,10 @@ async function renderVariance(container){
   const short = mismatched.filter(i=>i.effDiff<0), over = mismatched.filter(i=>i.effDiff>0);
   const matched = counted.filter(i=>i.effStatus==='matched');
 
-  container.appendChild(el('div','section-title','Stock Variance<div class="line"></div>'));
+  container.appendChild(printHeader(`รายงานวิเคราะห์ผลต่าง (Stock Variance) — ${round ? round.id : ''}`));
+  const varTitleRow = el('div','section-title','Stock Variance<div class="line"></div>');
+  container.appendChild(varTitleRow);
+  varTitleRow.appendChild(printButton('พิมพ์รายงานวิเคราะห์ผลต่างเป็น PDF'));
   const grid = el('div','kpi-grid');
   grid.appendChild(kpiCard('รายการตรง', num(matched.length),'','green'));
   grid.appendChild(kpiCard('รายการขาด', num(short.length),'','red'));
@@ -2750,7 +2768,10 @@ async function renderByCode(container){
   const notStarted = rowsArr.filter(g=>g.status==='uncounted');
   const mismatchCodes = doneCodes.filter(g=>g.diff!==0);
 
-  container.appendChild(el('div','section-title',`เปรียบเทียบตามรหัสสินค้า — ${round.id}<div class="line"></div>`));
+  container.appendChild(printHeader(`รายงานเปรียบเทียบตามรหัสสินค้า (SKU Comparison) — ${round.id}`));
+  const byCodeTitleRow = el('div','section-title',`เปรียบเทียบตามรหัสสินค้า — ${round.id}<div class="line"></div>`);
+  container.appendChild(byCodeTitleRow);
+  byCodeTitleRow.appendChild(printButton('พิมพ์รายงานเปรียบเทียบตามรหัสเป็น PDF'));
   const grid = el('div','kpi-grid');
   grid.appendChild(kpiCard('รหัสสินค้าทั้งหมด', num(totalCodes)));
   grid.appendChild(kpiCard('นับครบทุกตำแหน่งแล้ว', num(doneCodes.length),'','green'));
@@ -2766,16 +2787,19 @@ async function renderByCode(container){
   container.appendChild(searchRow);
 
   const wrap = el('div','table-wrap'); const t = el('table');
-  t.innerHTML = `<thead><tr>${sortableTh('Product','code','byCode')}${sortableTh('ชื่อสินค้า','name','byCode')}${sortableTh('ประเภท','cat','byCode')}${sortableTh('ตำแหน่ง/LOT','rows','byCode',true)}${sortableTh('System Qty รวม','systemQty','byCode',true)}${sortableTh('Count Qty รวม','countQty','byCode',true)}${sortableTh('Diff','diff','byCode',true)}<th>สถานะ</th></tr></thead>`;
+  t.innerHTML = `<thead><tr>${sortableTh('Product','code','byCode')}${sortableTh('ชื่อสินค้า','name','byCode')}${sortableTh('ประเภท','cat','byCode')}${sortableTh('ตำแหน่ง/LOT','rows','byCode',true)}${sortableTh('System Qty รวม','systemQty','byCode',true)}${sortableTh('Count Qty รวม','countQty','byCode',true)}${sortableTh('Diff','diff','byCode',true)}${sortableTh('สถานะ','status','byCode')}</tr></thead>`;
   wrap.appendChild(t); container.appendChild(wrap);
   const footerNote = el('div','footer-note',''); footerNote.style.display='none';
   container.appendChild(footerNote);
+
+  // ให้เรียงคอลัมน์ "สถานะ" ตามลำดับความสำคัญ (ยอดไม่ตรง > นับบางส่วน > ยังไม่นับ > ยอดตรง) แทนการเรียงตามตัวอักษรเฉยๆ
+  const statusRank = {mismatch:0, partial:1, uncounted:2, matched:3};
 
   function draw(){
     const q = searchInp.value.trim().toLowerCase();
     let list = rowsArr;
     if(q) list = list.filter(g=> g.code.toLowerCase().includes(q) || (g.name||'').toLowerCase().includes(q));
-    const sorted = applySorting(list, 'byCode', {code:g=>g.code,name:g=>g.name,cat:g=>g.cat||'',rows:g=>g.rows,systemQty:g=>g.systemQty,countQty:g=>g.countQty,diff:g=>g.diff});
+    const sorted = applySorting(list, 'byCode', {code:g=>g.code,name:g=>g.name,cat:g=>g.cat||'',rows:g=>g.rows,systemQty:g=>g.systemQty,countQty:g=>g.countQty,diff:g=>g.diff,status:g=>statusRank[g.status]});
     const finalSorted = getSort('byCode').key ? sorted : list.slice().sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff));
     const tb = el('tbody');
     finalSorted.slice(0,150).forEach(g=>{
