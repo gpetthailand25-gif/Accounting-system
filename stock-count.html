@@ -421,6 +421,10 @@ td.mono{font-family:var(--mono); font-size:12px;}
 .btn:disabled{opacity:.45; cursor:not-allowed;}
 
 .recount-flag{font-size:10.5px; color:var(--amber); margin-top:4px; display:flex; align-items:center; gap:5px;}
+.exc-reported-box{font-size:11px; color:#FF9DA0; margin-top:6px; padding:8px 10px; background:var(--red-bg); border:1px solid #5C2020; border-radius:var(--radius-sm); line-height:1.5;}
+.exc-reported-box b{color:#FFB3B6;}
+.exc-del-btn{display:block; margin-top:6px; padding:5px 10px; background:transparent; border:1px solid #5C2020; color:#FF9DA0; border-radius:var(--radius-sm); font-size:10.5px; cursor:pointer;}
+.exc-del-btn:disabled{opacity:.45; cursor:not-allowed;}
 .mini{font-size:11px; color:var(--text-faint);}
 
 .audit-row{display:grid; grid-template-columns:150px 110px 1fr; gap:14px; padding:10px 0; border-bottom:1px solid var(--border-soft); font-size:12px;}
@@ -643,19 +647,26 @@ td.mono{font-family:var(--mono); font-size:12px;}
   html, body{ background:#fff !important; color:#111 !important; }
   *{ box-shadow:none !important; text-shadow:none !important; }
 
-  @page{ size:A4; margin:24mm 14mm 14mm 14mm; }
+  /* เทคนิค position:fixed + top ติดลบ (ยกหัวกระดาษขึ้นไปอยู่ในโซน @page margin) ทดสอบแล้วเรนเดอร์ไม่เสถียรใน Chrome
+     บางครั้งหัวกระดาษไปโผล่ผิดตำแหน่ง (ท้ายหน้าก่อนหน้าแทนที่จะเป็นบนสุดของหน้าถัดไป) — เปลี่ยนวิธีให้ทนทานกว่าเดิม:
+     ไม่ทำหัวกระดาษซ้ำทุกหน้าอีกต่อไป ให้เป็นกล่องปกติ (ไม่ fixed) ที่แสดงครั้งเดียวบนสุดของรายงานเท่านั้น
+     วิธีนี้ตัดปัญหาเรื่องหัวกระดาษไปทับ/บังการ์ดในหน้าถัดๆ ไปทิ้งไปเลย เพราะไม่มีอะไรลอยทับซ้อนอยู่บนทุกหน้าอีกแล้ว */
+  /* margin 18mm (แทน 14mm เดิม) เผื่อพื้นที่ให้ข้อความ "Headers and footers" ของเบราว์เซอร์เอง (ชื่อรายงาน/วันที่ ด้านบน,
+     เลขหน้า ด้านล่าง) ซึ่งจะพิมพ์ซ้ำทุกหน้าให้อัตโนมัติเมื่อผู้ใช้เปิดตัวเลือกนี้ในหน้าต่างพิมพ์ ไม่ชนกับเนื้อหารายงาน */
+  @page{ size:A4; margin:18mm; }
 
-  /* หัวกระดาษ: ปักไว้ตายตัวบนสุดของทุกหน้า (Chrome/Edge จะพิมพ์ position:fixed ซ้ำทุกหน้าอัตโนมัติ) */
   .print-header{
     display:block !important;
-    position:fixed; top:0; left:0; right:0;
-    background:#fff; padding-bottom:10px; margin-bottom:0 !important;
-    border-bottom:2px solid #333; z-index:999;
+    position:static !important;
+    background:#fff; padding-bottom:10px; margin-bottom:14px !important;
+    border-bottom:2px solid #333;
   }
   .print-header .ph-title{ font-size:18px; font-weight:800; color:#111; }
   .print-header .ph-sub{ font-size:11px; color:#555; margin-top:3px; }
-  /* เว้นที่ด้านบนของเนื้อหาให้พ้นหัวกระดาษ ไม่ให้บรรทัดแรกถูกบัง */
-  .content{ padding:0 !important; padding-top:6mm !important; }
+  .content{ padding:0 !important; }
+
+
+
 
   /* พื้นหลังขาวล้วนทุก component ประหยัดหมึก + อ่านง่ายบนกระดาษ */
   .panel, .kpi, .bucket, .table-wrap, table, .round-card, .count-item, .reason-manage-panel{
@@ -686,13 +697,34 @@ td.mono{font-family:var(--mono); font-size:12px;}
   .pos{ color:#1a7a34 !important; }
   .neg{ color:#b3261e !important; }
 
-  /* จัดคอลัมน์ให้คงที่ตอนพิมพ์ ไม่ขึ้นกับความกว้าง viewport ของหน้าจอที่แสดงตอนกดพิมพ์ */
-  .kpi-grid{ grid-template-columns:repeat(3,1fr) !important; gap:8mm 6mm !important; }
-  .bucket-row{ grid-template-columns:repeat(5,1fr) !important; gap:4mm !important; }
+  /* จัดคอลัมน์ให้คงที่ตอนพิมพ์ ไม่ขึ้นกับความกว้าง viewport ของหน้าจอที่แสดงตอนกดพิมพ์
+     สำคัญ: Chromium มีบั๊กที่ break-inside:avoid ไม่ทำงานกับลูกของ display:grid อย่างน่าเชื่อถือ — เวลาการ์ดแถวสุดท้าย
+     ไม่พอสำหรับเหลือพื้นที่ในหน้ากระดาษ กลไกแบ่งหน้าของ Chrome จะ "ตัดกลางกล่อง" เลย (ส่วนบน/label ค้างอยู่หน้าเดิม
+     ส่วนล่าง/ตัวเลขไปโผล่บนสุดของหน้าถัดไปแทน) ไม่ใช่ย้ายทั้งการ์ดไปหน้าใหม่แบบที่ควรจะเป็น
+     แก้โดยเปลี่ยนจาก display:grid เป็น display:block + ลูกเป็น inline-block แทน ซึ่ง break-inside:avoid ใช้ได้ผลจริงในโหมดนี้ */
+  .kpi-grid{ display:block !important; font-size:0 !important; }
+  .kpi-grid > .kpi{
+    display:inline-block !important; width:31.3% !important; margin:0 3% 8mm 0 !important;
+    vertical-align:top !important; font-size:14px !important;
+    break-inside:avoid !important; page-break-inside:avoid !important;
+  }
+  .kpi-grid > .kpi:nth-child(3n){ margin-right:0 !important; }
+  .bucket-row{ display:block !important; font-size:0 !important; margin-bottom:18px !important; }
+  .bucket-row > .bucket{
+    display:inline-block !important; width:18.8% !important; margin:0 1.5% 4mm 0 !important;
+    vertical-align:top !important; font-size:14px !important;
+    break-inside:avoid !important; page-break-inside:avoid !important;
+  }
+  .bucket-row > .bucket:nth-child(5n){ margin-right:0 !important; }
+  .kpi, .bucket{ min-width:0 !important; }
+  .kpi .value, .kpi .label, .bucket .n, .bucket .lbl, .bucket .v{ overflow-wrap:break-word !important; word-break:break-word !important; }
+  .bucket{ padding:10px !important; }
+  .bucket .n{ font-size:18px !important; }
+  .bucket .v{ font-size:14px !important; }
 
   /* กันการ์ด/แถวตารางถูกตัดขาดกลางคันระหว่างหน้า */
-  .panel, .kpi, .bucket, .round-card, .count-item, tr{ break-inside:avoid; }
-  .section-title{ break-after:avoid; }
+  .panel, .kpi, .bucket, .round-card, .count-item, tr, .print-header{ break-inside:avoid !important; page-break-inside:avoid !important; }
+  .section-title{ break-after:avoid !important; page-break-after:avoid !important; }
 }
 </style>
 </head>
@@ -1156,23 +1188,32 @@ function applyExceptionMatches(detail, exceptions){
 
 async function reportException(roundId, payload){
   if(isRoundLocked(roundId)){ toast('รอบนี้ปิดแล้ว ไม่สามารถแจ้งรายงานผิดปกติเพิ่มได้','error'); return null; }
-  const rec = {
-    id: Math.random().toString(36).slice(2,9),
-    ...payload,
-    reportedBy: currentUser, reportedAt: nowStr(),
-    status: 'pending', resolution: ''
-  };
-  // ใช้ mutateDocAtomic เพื่ออ่านรายการล่าสุดจากเซิร์ฟเวอร์ก่อนเพิ่มรายการใหม่เข้าไป
-  // ป้องกันรายงานที่คนอื่นเพิ่งแจ้งเข้ามาพร้อมกันหายไปตอนเซฟทับ
+  // สำคัญ: ถ้าเคยแจ้งรายงานผิดปกติของแถวเดิม (รหัส+ตำแหน่ง+LOT เดิม) ไว้แล้ว และยังไม่ถูกอนุมัติ (status='pending')
+  // ให้ "แก้ไขรายการเดิม" แทนการสร้างรายการใหม่ซ้อนขึ้นมา — เพราะหน้าเทียบยอดนับ vs ระบบ จะรวม foundQty ของทุกรายการ
+  // ที่ตรงกับแถวต้นทางเดียวกัน (ดู applyExceptionMatches) ถ้าสร้างซ้ำ ยอดที่พบจะถูกบวกซ้ำเข้าไปอีกรอบ (ยอดเบิ้ล)
+  // ก่อนหน้านี้ทุกครั้งที่กดบันทึกจะสร้างรายการใหม่เสมอ ทำให้กดบันทึกซ้ำ (เช่น แก้ไขตัวเลขที่กรอกผิด) กลายเป็นสร้างรายการซ้อนแทนที่จะแก้ไขของเดิม
+  let isUpdate = false;
   const merged = await mutateDocAtomic('exceptions:'+roundId, (latest)=>{
     const list = latest || EXC_CACHE[roundId] || [];
-    list.unshift(rec);
+    const existing = list.find(e=> e.status==='pending' && e.code===payload.code && e.origLoc===payload.origLoc && e.origExp===payload.origExp);
+    if(existing){
+      Object.assign(existing, payload, {reportedBy: currentUser, reportedAt: nowStr()});
+      isUpdate = true;
+    } else {
+      list.unshift({
+        id: Math.random().toString(36).slice(2,9),
+        ...payload,
+        reportedBy: currentUser, reportedAt: nowStr(),
+        status: 'pending', resolution: ''
+      });
+    }
     return list;
   });
   if(merged==null) return null;
   EXC_CACHE[roundId] = merged;
+  const rec = merged.find(e=> e.status==='pending' && e.code===payload.code && e.origLoc===payload.origLoc && e.origExp===payload.origExp);
   await logAudit(
-    `แจ้งพบผิด${payload.type==='location_mismatch'?'ตำแหน่ง':'LOT'} ${payload.code}`,
+    `${isUpdate?'แก้ไขรายงาน':'แจ้งพบผิด'}${payload.type==='location_mismatch'?'ตำแหน่ง':'LOT'} ${payload.code}`,
     '-', `${payload.foundLoc||''} ${payload.foundExp||''} จำนวน=${payload.foundQty}`
   );
   return rec;
@@ -1272,6 +1313,55 @@ async function reverseException(roundId, excId){
   await logAudit(`ย้อนสถานะรายงานผิดปกติกลับเป็นรอดำเนินการ (แก้ไขข้อมูล) ${excCopy.code}`, 'resolved', 'pending');
   return true;
 }
+// ลบรายงานความผิดปกติทิ้งทั้งรายการ (ต่างจาก reverseException ที่แค่ย้อนสถานะกลับเป็น pending ให้แก้ไขใหม่)
+// ถ้ารายงานนี้เคย "ดำเนินการแล้ว" (resolved) ต้องย้อนผลที่มีต่อ Stock Balance (BASE) กลับให้ถูกต้องก่อนเสมอ
+// ไม่งั้นลบแค่ตัวรายงานทิ้งไป แต่ Stock Balance จะยังค้างการเปลี่ยนแปลงที่มาจากรายงานที่ถูกลบไปแล้วอยู่ (ตำแหน่งที่เคยย้าย/LOT ใหม่ที่เคยเพิ่ม)
+async function deleteException(roundId, excId){
+  let excCopy = null;
+  const merged0 = await mutateDocAtomic('exceptions:'+roundId, (latest)=>{
+    const list = latest || EXC_CACHE[roundId] || [];
+    const exc = list.find(e=>e.id===excId);
+    if(!exc) return list;
+    excCopy = {...exc};
+    return list;
+  });
+  if(merged0==null || !excCopy) return false;
+  EXC_CACHE[roundId] = merged0;
+
+  if(excCopy.status==='resolved'){
+    const action = (excCopy.resolution||'').split(' — ')[0];
+    if(action==='transfer_location'){
+      let from = null;
+      const mergedBase = await mutateDocAtomic('seed_v1', (latest)=>{
+        const list = latest || BASE || [];
+        const rec = list.find(i=> i.c===excCopy.code && i.exp===excCopy.origExp && i.loc===excCopy.foundLoc);
+        if(rec){ from = rec.loc; rec.loc = excCopy.origLoc; }
+        return list;
+      });
+      if(mergedBase!=null){ BASE = mergedBase; if(from!=null) await logAudit(`ย้อนกลับตำแหน่ง Stock Balance ${excCopy.code} (ก่อนลบรายงาน)`, from, excCopy.origLoc); }
+    } else if(action==='add_new_lot'){
+      let removed = false;
+      const mergedBase = await mutateDocAtomic('seed_v1', (latest)=>{
+        const list = latest || BASE || [];
+        const idx = list.findIndex(i=> i.c===excCopy.code && i.exp===excCopy.foundExp && i.loc===(excCopy.foundLoc||excCopy.origLoc) && i.qty===excCopy.foundQty && i.lmt==='ปรับปรุง');
+        if(idx>=0){ list.splice(idx,1); removed = true; }
+        return list;
+      });
+      if(mergedBase!=null){ BASE = mergedBase; if(removed) await logAudit(`ลบสต็อกที่เพิ่มผิดจาก Unknown LOT ${excCopy.code} (ก่อนลบรายงาน)`, `${excCopy.foundExp||'-'} จำนวน=${excCopy.foundQty}`, '-'); }
+    }
+  }
+
+  const merged = await mutateDocAtomic('exceptions:'+roundId, (latest)=>{
+    const list = latest || EXC_CACHE[roundId] || [];
+    const idx = list.findIndex(e=>e.id===excId);
+    if(idx>=0) list.splice(idx,1);
+    return list;
+  });
+  if(merged==null) return false;
+  EXC_CACHE[roundId] = merged;
+  await logAudit(`ลบรายงานความผิดปกติ ${excCopy.code}`, `${excCopy.foundLoc} / ${excCopy.foundExp||'-'} / ${excCopy.foundQty}`, '(ลบแล้ว)');
+  return true;
+}
 // แก้ไขข้อมูลที่แจ้งผิด (LOT/Location/จำนวน/หมายเหตุ) — ใช้ได้เฉพาะรายการที่ยังเป็น pending เท่านั้น
 async function editException(roundId, excId, updates){
   let before = null, code = null, ok = false;
@@ -1319,7 +1409,7 @@ const NAV = [
   {group:'วิเคราะห์ความเสี่ยง', items:[{id:'expiry', label:'สินค้าใกล้หมดอายุ'},{id:'nonmoving', label:'สินค้าไม่เคลื่อนไหว'}]},
   {group:'รอบนับสต็อก', items:[
     {id:'counts', label:'รอบการนับ'}, {id:'mobile', label:'หน้านับสต็อก (มือถือ)'},
-    {id:'review', label:'ตรวจสอบ & อนุมัติ'}, {id:'variance', label:'วิเคราะห์ผลต่าง'}]},
+    {id:'review', label:'ตรวจสอบ & อนุมัติ'}, {id:'variance', label:'วิเคราะห์ผลต่าง'}, {id:'byCode', label:'เปรียบเทียบตามรหัสสินค้า'}]},
   {group:'ข้อมูล', items:[{id:'import', label:'นำเข้าข้อมูล'},{id:'export', label:'ส่งออกรายงาน'}]},
   {group:'ระบบ', items:[{id:'audit', label:'Audit Trail'}]},
 ];
@@ -1333,6 +1423,7 @@ const TITLES = {
   mobile: ['หน้านับสต็อกสำหรับพนักงาน', 'บันทึกจำนวนที่นับได้จริง พร้อมยอดคงเหลือในระบบ'],
   review: ['ตรวจสอบผลการนับ', 'เทียบยอดนับกับยอดระบบ ก่อนอนุมัติ'],
   variance: ['วิเคราะห์ผลต่าง (Stock Variance)', 'ของรอบนับที่เลือก'],
+  byCode: ['เปรียบเทียบตามรหัสสินค้า', 'รวมทุกตำแหน่ง/LOT เข้าด้วยกันต่อรหัสสินค้า — จำนวนรวมในระบบ vs จำนวนที่นับได้ (รอบนับที่เลือก)'],
   audit: ['Audit Trail', 'ประวัติการแก้ไขทั้งหมดในระบบ (ล่าสุดก่อน)'],
   import: ['นำเข้าข้อมูล', 'อัปโหลด CSV / Excel เพื่ออัปเดต Stock Balance ตั้งต้น'],
   export: ['ส่งออกรายงาน', 'Export เป็น Excel, CSV หรือ PDF (พิมพ์)'],
@@ -1385,11 +1476,21 @@ function printHeader(title){
   const now = new Date();
   const dateStr = now.toLocaleDateString('th-TH', {year:'numeric', month:'long', day:'numeric'});
   h.innerHTML = `<div class="ph-title">${title}</div><div class="ph-sub">STOCKCOUNT / WMS · ออกรายงานเมื่อ ${dateStr} โดย ${currentUser||'-'}</div>`;
+  // เก็บชื่อรายงานไว้ตั้งเป็นชื่อแท็บ (document.title) ก่อนสั่งพิมพ์ — เบราว์เซอร์ใช้ document.title เป็นข้อความหัวกระดาษ
+  // ในฟีเจอร์ "Headers and footers" ของตัวเอง (ที่พิมพ์ซ้ำทุกหน้าได้เสถียรกว่าการทำ CSS fixed-position เอง)
+  window.__printTitle = `${title} · ${dateStr}`;
   return h;
 }
 function printButton(label){
   const b = el('button','print-btn no-print', '🖨️ '+(label||'พิมพ์ PDF'));
-  b.onclick = ()=> window.print();
+  b.onclick = ()=>{
+    const originalTitle = document.title;
+    if(window.__printTitle) document.title = window.__printTitle;
+    toast('ในหน้าต่างพิมพ์ กด "เพิ่มเติม/More settings" แล้วเปิด "หัวกระดาษและท้ายกระดาษ/Headers and footers" เพื่อให้ทุกหน้ามีชื่อรายงานและเลขหน้ากำกับ', 'info');
+    const restoreTitle = ()=>{ document.title = originalTitle; window.removeEventListener('afterprint', restoreTitle); };
+    window.addEventListener('afterprint', restoreTitle);
+    setTimeout(()=> window.print(), 60); // หน่วงเล็กน้อยให้ document.title อัปเดตก่อนเปิดหน้าต่างพิมพ์แน่ๆ
+  };
   return b;
 }
 
@@ -1461,7 +1562,7 @@ function kpiCard(label, value, unit, accent, extra){
 }
 function progressBar(p){ const w=el('div','kpi-bar'); const f=el('div','kpi-bar-fill'); f.style.width=Math.min(100,p)+'%'; w.appendChild(f); return w; }
 function statusBadge(kind){
-  const map = {match:['badge-green','ตรง'],matched:['badge-green','ตรง'], mismatch:['badge-red','ไม่ตรง'], pending:['badge-amber','รอตรวจสอบ'], counted:['badge-blue','นับแล้ว'], uncounted:['badge-gray','ยังไม่ได้นับ'], resolved:['badge-green','ดำเนินการแล้ว']};
+  const map = {match:['badge-green','ตรง'],matched:['badge-green','ตรง'], mismatch:['badge-red','ไม่ตรง'], pending:['badge-amber','รอตรวจสอบ'], counted:['badge-blue','นับแล้ว'], uncounted:['badge-gray','ยังไม่ได้นับ'], resolved:['badge-green','ดำเนินการแล้ว'], partial:['badge-amber','นับบางส่วน']};
   const [cls,label]=map[kind]||['badge-gray',kind];
   return el('span','badge '+cls, `<span class="dot"></span>${label}`);
 }
@@ -1593,79 +1694,104 @@ function statusChip(level, emoji, label, detail){
 // ============================================================
 async function renderExecSummary(container){
   const items = filterBase(BASE);
-  const totalValue = items.reduce((a,i)=>a+i.sv,0);
-  const activeItems = items.filter(i=>i.active!==false);
-  const inactiveItems = items.filter(i=>i.active===false);
+  // จัดกลุ่มทุกอย่างตาม "รหัสสินค้า (SKU)" ก่อนคำนวณเสมอ — ไม่ยึดตาม Location/LOT
+  // SKU หนึ่งอาจกระจายอยู่หลาย Location/LOT ในข้อมูลดิบ (BASE) แต่หน้านี้จะรวม (SUM) ค่าทั้งหมดของ SKU นั้นเข้าด้วยกันก่อน
+  // แล้วนับ/สรุปเป็น "1 SKU" เสมอ ไม่ใช่นับทีละแถว Location/LOT เหมือนหน้าอื่นๆ ในระบบ
+  const skuMap = new Map();
+  items.forEach(i=>{
+    if(!skuMap.has(i.c)) skuMap.set(i.c, {code:i.c, name:i.n, cat:i.cat, qty:0, value:0, hasActive:false, hasExpiry:false, minDte:null, unitCost:i.uc||0});
+    const g = skuMap.get(i.c);
+    g.qty += (i.qty||0);
+    g.value += (i.sv||0);
+    if(i.active!==false) g.hasActive = true; // ถือว่า SKU ยัง active ถ้ามีอย่างน้อย 1 ตำแหน่ง/LOT ที่ active
+    if(i.et){
+      g.hasExpiry = true;
+      if(i.dte!=null && (g.minDte===null || i.dte<g.minDte)) g.minDte = i.dte; // ใช้ LOT ที่ใกล้หมดอายุที่สุดของ SKU นั้นเป็นตัวกำหนดความเสี่ยง
+    }
+  });
+  const skus = Array.from(skuMap.values()).map(g=>{
+    let expiryBucket = 'none';
+    if(g.hasExpiry && g.minDte!=null){
+      if(g.minDte<0) expiryBucket='expired';
+      else if(g.minDte<=30) expiryBucket='near30';
+      else if(g.minDte<=60) expiryBucket='near60';
+      else if(g.minDte<=90) expiryBucket='near90';
+    }
+    return {...g, active: g.hasActive, expiryBucket};
+  });
 
-  const expiryItems = items.filter(i=>i.et);
-  const expired = expiryItems.filter(i=>i.dte!=null && i.dte<0);
-  const near30 = expiryItems.filter(i=>i.dte!=null && i.dte>=0 && i.dte<=30);
-  const near60 = expiryItems.filter(i=>i.dte!=null && i.dte>30 && i.dte<=60);
-  const near90 = expiryItems.filter(i=>i.dte!=null && i.dte>60 && i.dte<=90);
+  const totalValue = skus.reduce((a,g)=>a+g.value,0);
+  const activeSKU = skus.filter(g=>g.active);
+  const inactiveSKU = skus.filter(g=>!g.active); // SKU ที่ไม่ active เลยแม้แต่ตำแหน่ง/LOT เดียว
+  const expiredSKU = skus.filter(g=>g.expiryBucket==='expired');
+  const near30SKU = skus.filter(g=>g.expiryBucket==='near30');
+  const near60SKU = skus.filter(g=>g.expiryBucket==='near60');
+  const near90SKU = skus.filter(g=>g.expiryBucket==='near90');
+  const sumVal = arr => arr.reduce((a,g)=>a+g.value,0);
 
-  container.appendChild(printHeader('สรุปรายงานสต็อกสำหรับผู้บริหาร (Executive Summary)'));
-  const titleRow = el('div','section-title','🚦 สรุปสถานะโดยรวม<div class="line"></div>');
+  container.appendChild(printHeader('สรุปรายงานสต็อกสำหรับผู้บริหาร (Executive Summary) — สรุปตามจำนวน SKU'));
+  const titleRow = el('div','section-title','🚦 สรุปสถานะโดยรวม <span class="mini" style="margin-left:6px; text-transform:none; font-weight:400;">คำนวณจากจำนวน SKU ทั้งหมด (ไม่แยกตาม Location/LOT)</span><div class="line"></div>');
   container.appendChild(titleRow);
   titleRow.appendChild(printButton('พิมพ์รายงานผู้บริหารเป็น PDF'));
 
   // แถวสถานะใหญ่ ✅/⚠️/❌ — ดูปราดเดียวเข้าใจ ไม่ต้องอ่านตัวเลขละเอียด
   const statusRow = el('div','bucket-row');
   statusRow.appendChild(statusChip(
-    expired.length===0 ? 'ok' : 'urgent',
-    expired.length===0 ? '✅' : '❌',
+    expiredSKU.length===0 ? 'ok' : 'urgent',
+    expiredSKU.length===0 ? '✅' : '❌',
     'สินค้าหมดอายุ',
-    expired.length===0 ? 'ไม่มีรายการหมดอายุ' : `${num(expired.length)} รายการ (${money(expired.reduce((a,i)=>a+i.sv,0))})`
+    expiredSKU.length===0 ? 'ไม่มี SKU หมดอายุ' : `${num(expiredSKU.length)} SKU (${money(sumVal(expiredSKU))})`
   ));
   statusRow.appendChild(statusChip(
-    near30.length===0 ? 'ok' : 'warn',
-    near30.length===0 ? '✅' : '⚠️',
+    near30SKU.length===0 ? 'ok' : 'warn',
+    near30SKU.length===0 ? '✅' : '⚠️',
     'ใกล้หมดอายุ (30 วัน)',
-    near30.length===0 ? 'ไม่มีรายการใกล้หมดอายุ' : `${num(near30.length)} รายการ (${money(near30.reduce((a,i)=>a+i.sv,0))})`
+    near30SKU.length===0 ? 'ไม่มี SKU ใกล้หมดอายุ' : `${num(near30SKU.length)} SKU (${money(sumVal(near30SKU))})`
   ));
   statusRow.appendChild(statusChip(
-    near60.length===0 ? 'ok' : 'watch',
-    near60.length===0 ? '✅' : '👀',
+    near60SKU.length===0 ? 'ok' : 'watch',
+    near60SKU.length===0 ? '✅' : '👀',
     'ใกล้หมดอายุ (60 วัน)',
-    near60.length===0 ? 'ไม่มีรายการใกล้หมดอายุ' : `${num(near60.length)} รายการ (${money(near60.reduce((a,i)=>a+i.sv,0))})`
+    near60SKU.length===0 ? 'ไม่มี SKU ใกล้หมดอายุ' : `${num(near60SKU.length)} SKU (${money(sumVal(near60SKU))})`
   ));
   statusRow.appendChild(statusChip(
-    near90.length===0 ? 'ok' : 'watch',
-    near90.length===0 ? '✅' : '👀',
+    near90SKU.length===0 ? 'ok' : 'watch',
+    near90SKU.length===0 ? '✅' : '👀',
     'ใกล้หมดอายุ (90 วัน)',
-    near90.length===0 ? 'ไม่มีรายการใกล้หมดอายุ' : `${num(near90.length)} รายการ (${money(near90.reduce((a,i)=>a+i.sv,0))})`
+    near90SKU.length===0 ? 'ไม่มี SKU ใกล้หมดอายุ' : `${num(near90SKU.length)} SKU (${money(sumVal(near90SKU))})`
   ));
   statusRow.appendChild(statusChip(
-    inactiveItems.length===0 ? 'ok' : 'warn',
-    inactiveItems.length===0 ? '✅' : '⚠️',
+    inactiveSKU.length===0 ? 'ok' : 'warn',
+    inactiveSKU.length===0 ? '✅' : '⚠️',
     'สินค้าไม่เคลื่อนไหว',
-    inactiveItems.length===0 ? 'ไม่มีรายการ' : `${num(inactiveItems.length)} รายการ (${money(inactiveItems.reduce((a,i)=>a+i.sv,0))})`
+    inactiveSKU.length===0 ? 'ไม่มี SKU' : `${num(inactiveSKU.length)} SKU (${money(sumVal(inactiveSKU))})`
   ));
   container.appendChild(statusRow);
 
   container.appendChild(el('div','section-title','💰 ภาพรวมมูลค่าสต็อกทั้งหมด<div class="line"></div>'));
   const grid = el('div','kpi-grid');
   grid.appendChild(kpiCard('💰 มูลค่าสต็อกรวมทั้งหมด', money(totalValue)));
-  grid.appendChild(kpiCard('📦 จำนวนรายการทั้งหมด', num(items.length)));
-  grid.appendChild(kpiCard('✅ มูลค่าสินค้า Active', money(activeItems.reduce((a,i)=>a+i.sv,0)),'','green'));
-  grid.appendChild(kpiCard('❌ มูลค่าสินค้าไม่ Active', money(inactiveItems.reduce((a,i)=>a+i.sv,0)),'','red'));
+  grid.appendChild(kpiCard('📦 จำนวน SKU ทั้งหมด', num(skus.length)));
+  grid.appendChild(kpiCard('✅ มูลค่าสินค้า Active', money(sumVal(activeSKU)),'','green'));
+  grid.appendChild(kpiCard('❌ มูลค่าสินค้าไม่ Active', money(sumVal(inactiveSKU)),'','red'));
   container.appendChild(grid);
 
-  container.appendChild(el('div','section-title','⏰ ความเสี่ยงด้านวันหมดอายุ (ทุกประเภทยกเว้นบรรจุภัณฑ์)<div class="line"></div>'));
+  container.appendChild(el('div','section-title','⏰ ความเสี่ยงด้านวันหมดอายุ (ทุกประเภทยกเว้นบรรจุภัณฑ์) <span class="mini" style="margin-left:6px; text-transform:none; font-weight:400;">1 SKU นับตาม LOT ที่ใกล้หมดอายุที่สุดของ SKU นั้น</span><div class="line"></div>'));
   const gridExp = el('div','kpi-grid');
-  gridExp.appendChild(kpiCard((expired.length===0?'✅':'❌')+' มูลค่าสินค้าหมดอายุแล้ว', money(expired.reduce((a,i)=>a+i.sv,0)),'','red'));
-  gridExp.appendChild(kpiCard((expired.length===0?'✅':'❌')+' จำนวนรายการหมดอายุแล้ว', num(expired.length),'','red'));
-  gridExp.appendChild(kpiCard((near30.length===0?'✅':'⚠️')+' มูลค่าใกล้หมดอายุ (≤30 วัน)', money(near30.reduce((a,i)=>a+i.sv,0)),'','amber'));
-  gridExp.appendChild(kpiCard((near30.length===0?'✅':'⚠️')+' จำนวนรายการใกล้หมดอายุ (≤30 วัน)', num(near30.length),'','amber'));
-  gridExp.appendChild(kpiCard((near60.length===0?'✅':'👀')+' มูลค่าใกล้หมดอายุ (31-60 วัน)', money(near60.reduce((a,i)=>a+i.sv,0)),'','blue'));
-  gridExp.appendChild(kpiCard((near60.length===0?'✅':'👀')+' จำนวนรายการใกล้หมดอายุ (31-60 วัน)', num(near60.length),'','blue'));
-  gridExp.appendChild(kpiCard((near90.length===0?'✅':'👀')+' มูลค่าใกล้หมดอายุ (61-90 วัน)', money(near90.reduce((a,i)=>a+i.sv,0)),'','blue'));
-  gridExp.appendChild(kpiCard((near90.length===0?'✅':'👀')+' จำนวนรายการใกล้หมดอายุ (61-90 วัน)', num(near90.length),'','blue'));
+  gridExp.appendChild(kpiCard((expiredSKU.length===0?'✅':'❌')+' มูลค่า SKU หมดอายุแล้ว', money(sumVal(expiredSKU)),'','red'));
+  gridExp.appendChild(kpiCard((expiredSKU.length===0?'✅':'❌')+' จำนวน SKU หมดอายุแล้ว', num(expiredSKU.length),'','red'));
+  gridExp.appendChild(kpiCard((near30SKU.length===0?'✅':'⚠️')+' มูลค่า SKU ใกล้หมดอายุ (≤30 วัน)', money(sumVal(near30SKU)),'','amber'));
+  gridExp.appendChild(kpiCard((near30SKU.length===0?'✅':'⚠️')+' จำนวน SKU ใกล้หมดอายุ (≤30 วัน)', num(near30SKU.length),'','amber'));
+  gridExp.appendChild(kpiCard((near60SKU.length===0?'✅':'👀')+' มูลค่า SKU ใกล้หมดอายุ (31-60 วัน)', money(sumVal(near60SKU)),'','blue'));
+  gridExp.appendChild(kpiCard((near60SKU.length===0?'✅':'👀')+' จำนวน SKU ใกล้หมดอายุ (31-60 วัน)', num(near60SKU.length),'','blue'));
+  gridExp.appendChild(kpiCard((near90SKU.length===0?'✅':'👀')+' มูลค่า SKU ใกล้หมดอายุ (61-90 วัน)', money(sumVal(near90SKU)),'','blue'));
+  gridExp.appendChild(kpiCard((near90SKU.length===0?'✅':'👀')+' จำนวน SKU ใกล้หมดอายุ (61-90 วัน)', num(near90SKU.length),'','blue'));
   container.appendChild(gridExp);
 
-  container.appendChild(el('div','section-title','📉 สินค้าไม่เคลื่อนไหว (Active = N)<div class="line"></div>'));
+  container.appendChild(el('div','section-title','📉 สินค้าไม่เคลื่อนไหว (Active = N) <span class="mini" style="margin-left:6px; text-transform:none; font-weight:400;">SKU ที่ไม่ active แม้แต่ตำแหน่ง/LOT เดียว</span><div class="line"></div>'));
   const gridNM = el('div','kpi-grid');
-  gridNM.appendChild(kpiCard((inactiveItems.length===0?'✅':'⚠️')+' มูลค่าสินค้าไม่เคลื่อนไหว', money(inactiveItems.reduce((a,i)=>a+i.sv,0)),'','red'));
-  gridNM.appendChild(kpiCard((inactiveItems.length===0?'✅':'⚠️')+' จำนวนรายการไม่เคลื่อนไหว', num(inactiveItems.length),'','red'));
+  gridNM.appendChild(kpiCard((inactiveSKU.length===0?'✅':'⚠️')+' มูลค่า SKU ไม่เคลื่อนไหว', money(sumVal(inactiveSKU)),'','red'));
+  gridNM.appendChild(kpiCard((inactiveSKU.length===0?'✅':'⚠️')+' จำนวน SKU ไม่เคลื่อนไหว', num(inactiveSKU.length),'','red'));
   container.appendChild(gridNM);
 
   if(ACTIVE_ROUND){
@@ -1673,23 +1799,42 @@ async function renderExecSummary(container){
     if(round){
       const execExceptions = await loadExceptions(ACTIVE_ROUND);
       const detail = applyExceptionMatches(filterDetail(await loadDetail(ACTIVE_ROUND)), execExceptions);
-      const total = detail.length;
-      const counted = detail.filter(i=>i.status!=='uncounted');
-      const matched = counted.filter(i=>i.effStatus==='matched');
-      const mismatched = counted.filter(i=>i.effStatus==='mismatch');
-      const pctCounted = total? counted.length/total*100 : 0;
-      const pctAccuracy = counted.length? matched.length/counted.length*100 : 0;
-      const mismatchValue = mismatched.reduce((a,i)=>a+Math.abs((i.effDiff||0)*(i.unitCost||0)),0);
-      const accGood = pctAccuracy>=95, accWarn = pctAccuracy>=85 && pctAccuracy<95;
-      const accEmoji = accGood?'✅':(accWarn?'⚠️':'❌');
-      const countGood = pctCounted>=100;
 
-      container.appendChild(el('div','section-title',`📊 ความคืบหน้ารอบนับล่าสุด: ${round.id} · ${round.monthLabel} ${round.year}<div class="line"></div>`));
+      // รวมทุกตำแหน่ง/LOT ของรอบนับเข้าเป็น 1 แถวต่อ SKU ก่อนสรุปความคืบหน้า — เช่นเดียวกับส่วนบนของหน้านี้
+      const roundSkuMap = new Map();
+      detail.forEach(i=>{
+        if(!roundSkuMap.has(i.code)) roundSkuMap.set(i.code, {rows:0, rowsCounted:0, systemQty:0, countQty:0, unitCost:i.unitCost||0});
+        const g = roundSkuMap.get(i.code);
+        g.rows += 1; g.systemQty += (i.systemQty||0);
+        if(i.status!=='uncounted'){ g.rowsCounted += 1; g.countQty += (i.effQty||0); }
+      });
+      const roundSkus = Array.from(roundSkuMap.values()).map(g=>{
+        const fullyCounted = g.rowsCounted>0 && g.rowsCounted===g.rows;
+        const diff = g.countQty - g.systemQty;
+        return {...g, fullyCounted, diff, matched: fullyCounted && diff===0, mismatch: fullyCounted && diff!==0};
+      });
+      const totalSKU = roundSkus.length;
+      const skuDone = roundSkus.filter(g=>g.fullyCounted).length;
+      const skuPartial = roundSkus.filter(g=>g.rowsCounted>0 && !g.fullyCounted).length;
+      const skuNotStarted = roundSkus.filter(g=>g.rowsCounted===0).length;
+      const skuMatched = roundSkus.filter(g=>g.matched).length;
+      const skuMismatchList = roundSkus.filter(g=>g.mismatch);
+      const pctSkuDone = totalSKU? skuDone/totalSKU*100 : 0;
+      const pctSkuAccuracy = skuDone? skuMatched/skuDone*100 : 0;
+      const mismatchValue = skuMismatchList.reduce((a,g)=>a+Math.abs(g.diff*g.unitCost),0);
+      const accGood = pctSkuAccuracy>=95, accWarn = pctSkuAccuracy>=85 && pctSkuAccuracy<95;
+      const accEmoji = accGood?'✅':(accWarn?'⚠️':'❌');
+      const countGood = pctSkuDone>=100;
+
+      container.appendChild(el('div','section-title',`📊 ความคืบหน้ารอบนับล่าสุด: ${round.id} · ${round.monthLabel} ${round.year} <span class="mini" style="margin-left:6px; text-transform:none; font-weight:400;">นับตามจำนวน SKU</span><div class="line"></div>`));
       const gridRound = el('div','kpi-grid');
-      gridRound.appendChild(kpiCard((countGood?'✅':'⏳')+' % การนับสต็อกเสร็จสิ้น', pct(pctCounted),'','blue'));
-      gridRound.appendChild(kpiCard(accEmoji+' % ความถูกต้องของสต็อก', pct(pctAccuracy),'','green'));
-      gridRound.appendChild(kpiCard((mismatched.length===0?'✅':'❌')+' จำนวนรายการไม่ตรง', num(mismatched.length),'','red'));
-      gridRound.appendChild(kpiCard((mismatched.length===0?'✅':'❌')+' มูลค่าผลต่างรวม', money(mismatchValue),'','red'));
+      gridRound.appendChild(kpiCard('จำนวน SKU ในรอบนี้', num(totalSKU)));
+      gridRound.appendChild(kpiCard((countGood?'✅':'⏳')+' % SKU นับครบทุกตำแหน่งแล้ว', `${pct(pctSkuDone)}`,'','blue'));
+      gridRound.appendChild(kpiCard(accEmoji+' % SKU ยอดตรง (จากที่นับครบ)', pct(pctSkuAccuracy),'','green'));
+      gridRound.appendChild(kpiCard((skuPartial===0?'✅':'⚠️')+' SKU นับบางส่วน', num(skuPartial),'','amber'));
+      gridRound.appendChild(kpiCard((skuNotStarted===0?'✅':'👀')+' SKU ยังไม่เริ่มนับ', num(skuNotStarted),'','gray'));
+      gridRound.appendChild(kpiCard((skuMismatchList.length===0?'✅':'❌')+' SKU ยอดไม่ตรง (นับครบแล้ว)', num(skuMismatchList.length),'','red'));
+      gridRound.appendChild(kpiCard((skuMismatchList.length===0?'✅':'❌')+' มูลค่าผลต่างรวม', money(mismatchValue),'','red'));
       container.appendChild(gridRound);
     }
   } else {
@@ -1971,9 +2116,99 @@ async function renderMobile(container){
   });
 
   const resultsBox = el('div','count-grid'); resultsBox.id='mobileResults';
+
+  // ---------------- พบสินค้า/ตำแหน่ง/LOT ใหม่ที่ไม่มีอยู่ในรายการรอบนับนี้เลย ----------------
+  // ต่างจาก "พบผิดตำแหน่ง/ผิด LOT" ในการ์ดแต่ละแถว (ซึ่งผูกกับสินค้าที่มีอยู่ในรอบนับอยู่แล้ว)
+  // ปุ่มนี้ใช้ตอนเจอสินค้าจริงที่ไม่ถูกกำหนดไว้ในรอบนับนี้เลย (เช่น สินค้าที่มีในระบบแต่ไม่ได้ล็อกไว้ที่ Location นี้ หรือของที่ตกหล่นไปอยู่มุมอื่น)
+  const newItemSection = el('div',''); newItemSection.style.marginBottom='12px';
+  container.appendChild(newItemSection);
+  const newItemToggle = el('button','btn','🆕 พบสินค้า/ตำแหน่ง/LOT ใหม่ที่ไม่มีในรายการ');
+  newItemToggle.type='button'; newItemToggle.style.cssText='width:100%;';
+  newItemSection.appendChild(newItemToggle);
+  const newItemForm = el('div','exc-form'); newItemForm.style.cssText='display:none; margin-top:8px;';
+  newItemForm.innerHTML = `
+    <div class="exc-field">
+      <label>รหัสสินค้า (Product Code)</label>
+      <input type="text" class="ni-code" list="niCodeList" placeholder="พิมพ์หรือเลือกรหัสสินค้า...">
+      <datalist id="niCodeList"></datalist>
+    </div>
+    <div class="exc-field" style="display:none;" id="niNamePreviewWrap">
+      <label>ชื่อสินค้า</label>
+      <div class="ni-name-preview" style="font-size:13px; color:var(--text-dim);"></div>
+    </div>
+    <div class="exc-field">
+      <label>Location ที่เจอ</label>
+      <select class="ni-loc"><option value="">เลือก Location...</option></select>
+    </div>
+    <div class="exc-field">
+      <label>วันหมดอายุ/LOT (ถ้ามี)</label>
+      <input type="date" class="ni-exp">
+    </div>
+    <div class="exc-field">
+      <label>จำนวนที่เจอ</label>
+      <input type="number" class="ni-qty" value="0" inputmode="decimal">
+    </div>
+    <div class="exc-field">
+      <label>หมายเหตุ (ถ้ามี)</label>
+      <input type="text" class="ni-note" placeholder="เช่น เจอตกหล่นหลังชั้นวาง">
+    </div>
+    <button class="btn btn-primary ni-submit" type="button">บันทึกรายการที่พบใหม่</button>
+  `;
+  newItemSection.appendChild(newItemForm);
+  newItemToggle.onclick = ()=>{ newItemForm.style.display = newItemForm.style.display==='none' ? 'flex' : 'none'; };
+  const niCodeListEl = newItemForm.querySelector('#niCodeList');
+  const uniqCodes = new Map();
+  BASE.forEach(i=>{ if(!uniqCodes.has(i.c)) uniqCodes.set(i.c, i); });
+  uniqCodes.forEach((i,code)=>{ const o=document.createElement('option'); o.value=code; o.label=i.n; niCodeListEl.appendChild(o); });
+  const niLocSel = newItemForm.querySelector('.ni-loc');
+  noWheelChange(newItemForm.querySelector('.ni-qty'));
+  [...new Set(BASE.map(i=>i.loc))].sort().forEach(l=>{ const o=document.createElement('option'); o.value=l; o.textContent=l; niLocSel.appendChild(o); });
+  const niCodeInp = newItemForm.querySelector('.ni-code');
+  const niNameWrap = newItemForm.querySelector('#niNamePreviewWrap');
+  const niNamePreview = newItemForm.querySelector('.ni-name-preview');
+  niCodeInp.oninput = ()=>{
+    const match = uniqCodes.get(niCodeInp.value.trim());
+    if(match){ niNamePreview.textContent = match.n; niNameWrap.style.display='block'; }
+    else { niNameWrap.style.display='none'; }
+  };
+  newItemForm.querySelector('.ni-submit').onclick = async ()=>{
+    const code = niCodeInp.value.trim();
+    const match = uniqCodes.get(code);
+    const foundLoc = niLocSel.value;
+    const foundExp = newItemForm.querySelector('.ni-exp').value;
+    const foundQty = +newItemForm.querySelector('.ni-qty').value || 0;
+    const note = newItemForm.querySelector('.ni-note').value.trim();
+    if(!code){ toast('กรุณาระบุรหัสสินค้า','error'); return; }
+    if(!foundLoc){ toast('กรุณาเลือก Location ที่เจอ','error'); return; }
+    if(foundQty<=0){ toast('กรุณาระบุจำนวนที่เจอ','error'); return; }
+    const btn = newItemForm.querySelector('.ni-submit');
+    btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
+    try{
+      // ใช้ "พบใหม่ @ Location + LOT" เป็น origLoc/origExp เทียม เพื่อให้ reportException แยกแยะรายการที่พบใหม่แต่ละตำแหน่ง/LOT ออกจากกันได้
+      // (กันไม่ให้ระบบเข้าใจผิดว่าเป็นการแก้ไขรายการเดิม ถ้าสินค้ารหัสเดียวกันไปพบใหม่คนละตำแหน่ง/LOT อีกจุด)
+      await reportException(ACTIVE_ROUND, {
+        code, name: match?match.n:code, unit: match?match.u:'', cat: match?match.cat:'',
+        origLoc: `พบใหม่ @ ${foundLoc}`, origExp: foundExp||null,
+        type: 'new_item', foundLoc, foundExp: foundExp||null, foundQty, note
+      });
+      exceptions = EXC_CACHE[ACTIVE_ROUND] || exceptions;
+      toast('บันทึกรายการที่พบใหม่แล้ว — รอหัวหน้างานตรวจสอบ', 'success');
+      niCodeInp.value=''; newItemForm.querySelector('.ni-exp').value=''; newItemForm.querySelector('.ni-qty').value='0'; newItemForm.querySelector('.ni-note').value='';
+      niNameWrap.style.display='none'; niLocSel.value='';
+      newItemForm.style.display='none';
+    }catch(e){
+      console.error('reportException(new_item) failed', e);
+      toast('บันทึกไม่สำเร็จ กรุณาลองใหม่: '+(e.message||e), 'error');
+    } finally {
+      btn.disabled=false; btn.textContent='บันทึกรายการที่พบใหม่';
+    }
+  };
+  if(locked){ newItemToggle.disabled = true; newItemForm.querySelectorAll('input,select,button').forEach(elm=>elm.disabled=true); }
+
   container.appendChild(resultsBox);
 
   let detail = await loadDetail(ACTIVE_ROUND);
+  let exceptions = await loadExceptions(ACTIVE_ROUND);
   const resultsEl = () => document.getElementById('mobileResults');
 
   function renderList(codeQuery, textQuery){
@@ -2003,6 +2238,18 @@ async function renderMobile(container){
           <div class="sysqty"><span>ยอดคงเหลือในระบบ</span>${num(item.systemQty)} ${item.unit}</div>
         </div>
         ${item.status!=='uncounted' ? `<div class="recount-flag">${item.status==='matched'?'✅ นับแล้ว ตรงกับระบบ':'⚠️ นับแล้ว ไม่ตรง — แตะเพื่อนับซ้ำ'}</div>` : ''}
+        ${(function(){
+          // แสดงข้อมูลรายงานผิดตำแหน่ง/ผิด LOT ที่เคยแจ้งไว้แล้วของแถวนี้ (ถ้ามี) — ให้เห็นข้อมูลที่กรอกไว้โดยไม่ต้องกดเปิดฟอร์มใหม่ พร้อมปุ่มลบ
+          const myExc = exceptions.filter(e=> e.code===item.code && e.origLoc===item.loc && e.origExp===item.exp);
+          if(myExc.length===0) return '';
+          return myExc.map(e=>{
+            const typeLabel = e.type==='location_mismatch' ? '📍 ผิดตำแหน่ง' : (e.type==='new_item' ? '🆕 พบสินค้าใหม่' : '🏷️ ผิด LOT');
+            const foundStr = e.type==='location_mismatch' ? e.foundLoc : `${e.foundLoc} / ${e.foundExp?fmtDateTH(e.foundExp):'-'}`;
+            const statusStr = e.status==='pending' ? 'รอตรวจสอบ' : 'ดำเนินการแล้ว';
+            return `<div class="exc-reported-box">⚠️ <b>แจ้งไว้แล้ว (${statusStr})</b> — ${typeLabel}: พบที่ ${foundStr} จำนวน ${num(e.foundQty)} ${e.unit||''}${e.note?' · '+e.note:''}<br><span style="color:var(--text-faint)">โดย ${e.reportedBy} · ${e.reportedAt}</span>
+              <button class="exc-del-btn" type="button" data-exc-id="${e.id}">🗑️ ลบรายการนี้</button></div>`;
+          }).join('');
+        })()}
         <div class="qty-input">
           <label>จำนวนที่นับจริง (Actual Qty)</label>
           <div class="qty-row">
@@ -2063,12 +2310,43 @@ async function renderMobile(container){
       };
       btnSave.onclick = async ()=>{
         btnSave.disabled = true; btnSave.textContent = 'กำลังบันทึก...';
-        const qty = +field.value || 0;
-        await submitCount(ACTIVE_ROUND, item.id, qty);
-        detail = DETAIL_CACHE[ACTIVE_ROUND] || detail; // ดึงยอดล่าสุดจากเซิร์ฟเวอร์ (รวมรายการของคนอื่นที่เพิ่งบันทึกไปด้วย) มาใช้แสดงผลต่อ
-        toast(`บันทึก ${item.code} = ${num(qty)} ${item.unit}`, 'success');
-        renderList(document.getElementById('mobileSearchCode').value, document.getElementById('mobileSearchText').value);
+        try{
+          const qty = +field.value || 0;
+          await submitCount(ACTIVE_ROUND, item.id, qty);
+          detail = DETAIL_CACHE[ACTIVE_ROUND] || detail; // ดึงยอดล่าสุดจากเซิร์ฟเวอร์ (รวมรายการของคนอื่นที่เพิ่งบันทึกไปด้วย) มาใช้แสดงผลต่อ
+          toast(`บันทึก ${item.code} = ${num(qty)} ${item.unit}`, 'success');
+          renderList(document.getElementById('mobileSearchCode').value, document.getElementById('mobileSearchText').value);
+        }catch(e){
+          // ถ้าบันทึกล้มเหลว (เช่น เน็ตหลุด/เขียนชนกัน) ต้องคืนสถานะปุ่มให้กดใหม่ได้ ไม่งั้นปุ่มจะค้างเป็น "กำลังบันทึก..." ตลอดไป
+          // ซึ่งดูเหมือนกดบันทึกซ้ำไม่ได้ ทั้งที่จริงคือค้างจากรอบก่อนที่บันทึกไม่สำเร็จ
+          console.error('submitCount failed', e);
+          toast('บันทึกไม่สำเร็จ กรุณาลองใหม่: '+(e.message||e), 'error');
+          btnSave.disabled = false; btnSave.textContent = item.status==='uncounted' ? 'บันทึกจำนวนที่นับ' : 'บันทึกการนับซ้ำ';
+        }
       };
+
+      // ปุ่มลบรายงานผิดตำแหน่ง/ผิด LOT ที่เคยแจ้งไว้ (ในกล่อง "แจ้งไว้แล้ว")
+      card.querySelectorAll('.exc-del-btn').forEach(btn=>{
+        btn.disabled = locked;
+        btn.onclick = async ()=>{
+          if(!confirm('ต้องการลบรายงานนี้ใช่หรือไม่? ถ้ารายงานนี้ดำเนินการไปแล้ว ระบบจะย้อนผลที่มีต่อ Stock Balance กลับให้ด้วย')) return;
+          btn.disabled = true; const oldTxt = btn.textContent; btn.textContent = 'กำลังลบ...';
+          try{
+            const ok = await deleteException(ACTIVE_ROUND, btn.dataset.excId);
+            if(ok){
+              exceptions = EXC_CACHE[ACTIVE_ROUND] || exceptions;
+              toast('ลบรายงานแล้ว', 'success');
+              renderList(document.getElementById('mobileSearchCode').value, document.getElementById('mobileSearchText').value);
+            } else {
+              toast('ลบไม่สำเร็จ ไม่พบรายงานนี้แล้ว', 'error'); btn.disabled=false; btn.textContent=oldTxt;
+            }
+          }catch(e){
+            console.error('deleteException failed', e);
+            toast('ลบไม่สำเร็จ กรุณาลองใหม่: '+(e.message||e), 'error');
+            btn.disabled=false; btn.textContent=oldTxt;
+          }
+        };
+      });
 
       // exception report wiring
       const excToggle = card.querySelector('.exc-toggle');
@@ -2097,15 +2375,23 @@ async function renderMobile(container){
         if(type==='unknown_lot' && !foundExp){ toast('กรุณาระบุวันหมดอายุที่เจอจริง','error'); return; }
         const subBtn = card.querySelector('.exc-submit');
         subBtn.disabled = true; subBtn.textContent = 'กำลังบันทึก...';
-        await submitCount(ACTIVE_ROUND, item.id, remainQty);
-        detail = DETAIL_CACHE[ACTIVE_ROUND] || detail; // ดึงยอดล่าสุดจากเซิร์ฟเวอร์มาใช้แสดงผลต่อ (เช่นเดียวกับปุ่มบันทึกจำนวนปกติ)
-        await reportException(ACTIVE_ROUND, {
-          code:item.code, name:item.name, unit:item.unit, cat:item.cat,
-          origLoc:item.loc, origExp:item.exp,
-          type, foundLoc, foundExp, foundQty, note
-        });
-        toast('บันทึกรายงานความผิดปกติแล้ว — รอหัวหน้างานตรวจสอบ', 'success');
-        renderList(document.getElementById('mobileSearchCode').value, document.getElementById('mobileSearchText').value);
+        try{
+          await submitCount(ACTIVE_ROUND, item.id, remainQty);
+          detail = DETAIL_CACHE[ACTIVE_ROUND] || detail; // ดึงยอดล่าสุดจากเซิร์ฟเวอร์มาใช้แสดงผลต่อ (เช่นเดียวกับปุ่มบันทึกจำนวนปกติ)
+          await reportException(ACTIVE_ROUND, {
+            code:item.code, name:item.name, unit:item.unit, cat:item.cat,
+            origLoc:item.loc, origExp:item.exp,
+            type, foundLoc, foundExp, foundQty, note
+          });
+          exceptions = EXC_CACHE[ACTIVE_ROUND] || exceptions; // ให้กล่อง "แจ้งไว้แล้ว" บนการ์ดอัปเดตทันทีหลังบันทึก
+          toast('บันทึกรายงานความผิดปกติแล้ว — รอหัวหน้างานตรวจสอบ', 'success');
+          renderList(document.getElementById('mobileSearchCode').value, document.getElementById('mobileSearchText').value);
+        }catch(e){
+          // เช่นเดียวกับปุ่มบันทึกจำนวนปกติ — ถ้าไม่ดักไว้ ปุ่มจะค้างดิสเอเบิลตลอดไปเมื่อบันทึกล้มเหลว ดูเหมือนกดซ้ำไม่ได้
+          console.error('reportException failed', e);
+          toast('บันทึกรายงานไม่สำเร็จ กรุณาลองใหม่: '+(e.message||e), 'error');
+          subBtn.disabled = false; subBtn.textContent = 'บันทึกรายงานความผิดปกติ';
+        }
       };
 
       if(locked){
@@ -2181,7 +2467,7 @@ async function renderReview(container){
     const allLocs = [...new Set(BASE.map(i=>i.loc))].sort();
     exceptions.forEach(exc=>{
       const tr = el('tr');
-      const typeLabel = exc.type==='location_mismatch' ? '📍 ผิดตำแหน่ง' : '🏷️ ผิด LOT';
+      const typeLabel = exc.type==='location_mismatch' ? '📍 ผิดตำแหน่ง' : (exc.type==='new_item' ? '🆕 พบสินค้าใหม่' : '🏷️ ผิด LOT');
       const origStr = `${exc.origLoc}${exc.origExp?' / '+fmtDateTH(exc.origExp):''}`;
       const foundStr = exc.type==='location_mismatch' ? exc.foundLoc : `${exc.foundLoc} / ${exc.foundExp?fmtDateTH(exc.foundExp):'-'}`;
       tr.innerHTML = `<td class="mini">${typeLabel}</td><td class="mono">${exc.code}</td><td class="prodname" title="${exc.name}">${exc.name}</td>
@@ -2225,6 +2511,15 @@ async function renderReview(container){
         const editBtn = el('button','btn','✏️ แก้ไข');
         editBtn.onclick = ()=>{ editRow.style.display = editRow.style.display==='none' ? '' : 'none'; };
         actions.appendChild(editBtn);
+        const delBtn = el('button','btn btn-danger','🗑️ ลบ');
+        delBtn.onclick = async ()=>{
+          if(!confirm('ต้องการลบรายงานนี้ใช่หรือไม่?')) return;
+          delBtn.disabled=true; delBtn.textContent='กำลังลบ...';
+          const ok = await deleteException(ACTIVE_ROUND, exc.id);
+          if(ok){ toast('ลบรายงานแล้ว','success'); render(); }
+          else { toast('ลบไม่สำเร็จ','error'); delBtn.disabled=false; delBtn.textContent='🗑️ ลบ'; }
+        };
+        actions.appendChild(delBtn);
         if(locked){ actions.querySelectorAll('button').forEach(b=>b.disabled=true); }
         tr.children[8].appendChild(actions);
       } else {
@@ -2239,6 +2534,16 @@ async function renderReview(container){
           else { toast('ย้อนสถานะไม่สำเร็จ','error'); undoBtn.disabled=false; undoBtn.textContent='↩️ พบว่าบันทึกผิด แก้ไขใหม่'; }
         };
         resolvedWrap.appendChild(undoBtn);
+        const delBtnR = el('button','btn btn-danger','🗑️ ลบรายงานนี้ (ย้อน Stock Balance กลับให้ด้วย)');
+        delBtnR.onclick = async ()=>{
+          if(!confirm('รายงานนี้ดำเนินการไปแล้ว การลบจะย้อนผลที่มีต่อ Stock Balance กลับให้ด้วย ต้องการลบใช่หรือไม่?')) return;
+          delBtnR.disabled=true; delBtnR.textContent='กำลังลบ...';
+          const ok = await deleteException(ACTIVE_ROUND, exc.id);
+          if(ok){ toast('ลบรายงานและย้อน Stock Balance กลับแล้ว','success'); render(); }
+          else { toast('ลบไม่สำเร็จ','error'); delBtnR.disabled=false; delBtnR.textContent='🗑️ ลบรายงานนี้ (ย้อน Stock Balance กลับให้ด้วย)'; }
+        };
+        if(locked) delBtnR.disabled = true;
+        resolvedWrap.appendChild(delBtnR);
         tr.children[8].appendChild(resolvedWrap);
       }
       etb.appendChild(tr);
@@ -2298,33 +2603,56 @@ async function renderReview(container){
     else { renderReasonPanel(); reasonPanel.style.display='flex'; }
   };
 
+  const searchRow = el('div',''); searchRow.style.cssText='display:flex; gap:8px; margin-bottom:10px;';
+  const reviewSearchInp = document.createElement('input');
+  reviewSearchInp.type='text'; reviewSearchInp.placeholder='ค้นหารหัสสินค้าหรือชื่อ...'; reviewSearchInp.className='reason-edit-input'; reviewSearchInp.style.maxWidth='320px';
+  searchRow.appendChild(reviewSearchInp);
+  container.appendChild(searchRow);
+
   const wrap = el('div','table-wrap'); const t = el('table');
-  t.innerHTML = `<thead><tr>${sortableTh('Product','code','review')}${sortableTh('ชื่อสินค้า','name','review')}${sortableTh('LOT','exp','review')}${sortableTh('Location','loc','review')}${sortableTh('System Qty','systemQty','review',true)}${sortableTh('Count Qty','effQty','review',true)}${sortableTh('Diff','effDiff','review',true)}<th>สถานะ</th><th>เหตุผล</th></tr></thead>`;
-  const tb = el('tbody');
-  const sorted = applySorting(counted, 'review', {code:i=>i.code,name:i=>i.name,exp:i=>i.exp||'',loc:i=>i.loc,systemQty:i=>i.systemQty,effQty:i=>i.effQty,effDiff:i=>i.effDiff});
-  const finalSorted = getSort('review').key ? sorted : counted.slice().sort((a,b)=>Math.abs(b.effDiff)-Math.abs(a.effDiff));
-  finalSorted.slice(0,80).forEach(i=>{
-    const diffClass = i.effDiff>0?'pos':(i.effDiff<0?'neg':'');
-    const tr = el('tr');
-    const countCellNote = i.exceptionQty>0 ? `<div class="mini" style="color:var(--text-faint); margin-top:2px;">(${num(i.finalQty)} + ${num(i.exceptionQty)} จากตำแหน่งอื่น)</div>` : '';
-    tr.innerHTML = `<td class="mono">${i.code}</td><td class="prodname" title="${i.name}">${i.name}</td><td class="mono">${fmtLot(i)}</td><td>${i.loc}</td>
-      <td class="num mono">${num(i.systemQty)}</td><td class="num mono">${num(i.effQty)}${countCellNote}</td>
-      <td class="num mono ${diffClass}">${i.effDiff>0?'+':''}${num(i.effDiff)}</td><td></td><td></td>`;
-    tr.children[7].appendChild(statusBadge(i.effStatus));
-    if(i.effStatus==='mismatch'){
-      const sel = document.createElement('select'); sel.className='reason-select';
-      ['เลือกเหตุผล...', ...reasonList].forEach(r=>{
-        const o=document.createElement('option'); o.textContent=r; if(r===i.reason) o.selected=true; sel.appendChild(o);
-      });
-      sel.onchange = async ()=>{ await setReason(ACTIVE_ROUND, i.id, sel.value==='เลือกเหตุผล...'?'':sel.value); toast('บันทึกเหตุผลแล้ว','success'); };
-      sel.disabled = locked;
-      tr.children[8].appendChild(sel);
-    } else { tr.children[8].innerHTML = '<span style="color:var(--text-faint)">—</span>'; }
-    tb.appendChild(tr);
-  });
-  t.appendChild(tb); wrap.appendChild(t); container.appendChild(wrap);
-  wireSortableHeaders(t, render);
-  if(finalSorted.length>80) container.appendChild(el('div','footer-note',`แสดง 80 จาก ${finalSorted.length} รายการ`));
+  t.innerHTML = `<thead><tr>${sortableTh('Product','code','review')}${sortableTh('ชื่อสินค้า','name','review')}${sortableTh('LOT','exp','review')}${sortableTh('Location','loc','review')}${sortableTh('System Qty','systemQty','review',true)}${sortableTh('Count Qty','effQty','review',true)}${sortableTh('Diff','effDiff','review',true)}<th>สถานะ</th><th>แจ้งโดย</th><th>เหตุผล</th></tr></thead>`;
+  wrap.appendChild(t); container.appendChild(wrap);
+  const reviewFooterNote = el('div','footer-note',''); reviewFooterNote.style.display='none';
+  container.appendChild(reviewFooterNote);
+
+  function drawReviewTable(){
+    const q = reviewSearchInp.value.trim().toLowerCase();
+    const base = q ? counted.filter(i=> i.code.toLowerCase().includes(q) || (i.name||'').toLowerCase().includes(q)) : counted;
+    const sorted = applySorting(base, 'review', {code:i=>i.code,name:i=>i.name,exp:i=>i.exp||'',loc:i=>i.loc,systemQty:i=>i.systemQty,effQty:i=>i.effQty,effDiff:i=>i.effDiff});
+    const finalSorted = getSort('review').key ? sorted : base.slice().sort((a,b)=>Math.abs(b.effDiff)-Math.abs(a.effDiff));
+    const tb = el('tbody');
+    finalSorted.slice(0,80).forEach(i=>{
+      const diffClass = i.effDiff>0?'pos':(i.effDiff<0?'neg':'');
+      const tr = el('tr');
+      const countCellNote = i.exceptionQty>0 ? `<div class="mini" style="color:var(--text-faint); margin-top:2px;">(${num(i.finalQty)} + ${num(i.exceptionQty)} จากตำแหน่งอื่น)</div>` : '';
+      const reportedByHtml = i.countedBy ? `${i.countedBy}<br><span style="color:var(--text-faint)">${i.countedAt||''}</span>` : '<span style="color:var(--text-faint)">—</span>';
+      tr.innerHTML = `<td class="mono">${i.code}</td><td class="prodname" title="${i.name}">${i.name}</td><td class="mono">${fmtLot(i)}</td><td>${i.loc}</td>
+        <td class="num mono">${num(i.systemQty)}</td><td class="num mono">${num(i.effQty)}${countCellNote}</td>
+        <td class="num mono ${diffClass}">${i.effDiff>0?'+':''}${num(i.effDiff)}</td><td></td><td class="mini">${reportedByHtml}</td><td></td>`;
+      tr.children[7].appendChild(statusBadge(i.effStatus));
+      if(i.effStatus==='mismatch'){
+        const sel = document.createElement('select'); sel.className='reason-select';
+        ['เลือกเหตุผล...', ...reasonList].forEach(r=>{
+          const o=document.createElement('option'); o.textContent=r; if(r===i.reason) o.selected=true; sel.appendChild(o);
+        });
+        sel.onchange = async ()=>{ await setReason(ACTIVE_ROUND, i.id, sel.value==='เลือกเหตุผล...'?'':sel.value); toast('บันทึกเหตุผลแล้ว','success'); };
+        sel.disabled = locked;
+        tr.children[9].appendChild(sel);
+      } else { tr.children[9].innerHTML = '<span style="color:var(--text-faint)">—</span>'; }
+      tb.appendChild(tr);
+    });
+    t.querySelector('tbody')?.remove();
+    t.appendChild(tb);
+    if(finalSorted.length>80){
+      reviewFooterNote.textContent = `แสดง 80 จาก ${finalSorted.length} รายการ`;
+      reviewFooterNote.style.display = '';
+    } else {
+      reviewFooterNote.style.display = 'none';
+    }
+    wireSortableHeaders(t, drawReviewTable);
+  }
+  reviewSearchInp.oninput = drawReviewTable;
+  drawReviewTable();
 
   const bar = el('div','step-actions');
   const canApprove = round.status==='counting' || round.status==='review';
@@ -2371,6 +2699,109 @@ async function renderVariance(container){
 
   container.appendChild(el('div','section-title','รายการผลต่างทั้งหมด<div class="line"></div>'));
   container.appendChild(varianceTable(mismatched.slice().sort((a,b)=>Math.abs(b.effDiff*b.unitCost)-Math.abs(a.effDiff*a.unitCost)), 'variance-full'));
+}
+
+// ============================================================
+// TAB: BY PRODUCT CODE — รวมทุกตำแหน่ง/LOT เข้าด้วยกันต่อรหัสสินค้า
+// ============================================================
+// ต่างจากหน้า "ตรวจสอบ & อนุมัติ" / "วิเคราะห์ผลต่าง" ตรงที่หน้าเหล่านั้นแสดงทีละแถว (ตำแหน่ง/LOT)
+// และแสดงเฉพาะรายการที่นับแล้ว — หน้านี้รวมทุกแถวของรหัสเดียวกันเป็น 1 แถว และแสดง "รหัสทั้งหมด" แม้ยังไม่ได้นับเลยก็ตาม
+// เพื่อให้เห็นภาพรวมว่าแต่ละรหัสสินค้า จำนวนรวมในระบบเทียบกับจำนวนที่นับได้จริงต่างกันแค่ไหน และนับไปแล้วกี่ตำแหน่ง/LOต จากทั้งหมด
+async function renderByCode(container){
+  if(!ACTIVE_ROUND){ container.appendChild(emptyState('ยังไม่มีรอบนับ','')); return; }
+  const round = ROUNDS.find(r=>r.id===ACTIVE_ROUND);
+  const exceptions = await loadExceptions(ACTIVE_ROUND);
+  // ใช้ filterDetail แบบเดียวกับหน้าอื่น (ตัวกรอง Location/Category ที่ด้านบนยังใช้ร่วมกันได้) แต่ไม่ใช้ตัวกรองสถานะนับ (Counted/Uncounted/Mismatch)
+  // เพราะหน้านี้ต้องการรวมทุกแถวของรหัสเดียวกัน (ทั้งที่นับแล้วและยังไม่นับ) เพื่อคำนวณยอดรวมให้ถูกต้อง
+  const rawDetail = await loadDetail(ACTIVE_ROUND);
+  const filtered = rawDetail.filter(i=>{
+    if(state.location && i.loc!==state.location) return false;
+    if(state.category && i.cat!==state.category) return false;
+    return true;
+  });
+  const detail = applyExceptionMatches(filtered, exceptions);
+
+  // รวมทุกแถว (ตำแหน่ง/LOT) ของรหัสเดียวกันเป็น 1 กลุ่ม
+  const byCode = new Map();
+  detail.forEach(i=>{
+    if(!byCode.has(i.code)){
+      byCode.set(i.code, {code:i.code, name:i.name, cat:i.cat, unit:i.unit, systemQty:0, countQty:0, rows:0, rowsCounted:0, unitCost:i.unitCost||0});
+    }
+    const g = byCode.get(i.code);
+    g.systemQty += (i.systemQty||0);
+    g.rows += 1;
+    if(i.status!=='uncounted'){
+      g.rowsCounted += 1;
+      g.countQty += (i.effQty||0);
+    }
+  });
+  const rowsArr = Array.from(byCode.values()).map(g=>{
+    const fullyCounted = g.rowsCounted>0 && g.rowsCounted===g.rows;
+    const diff = g.countQty - g.systemQty;
+    let status = 'uncounted';
+    if(g.rowsCounted>0 && !fullyCounted) status = 'partial';
+    else if(fullyCounted) status = diff===0 ? 'matched' : 'mismatch';
+    return {...g, diff, fullyCounted, status};
+  });
+
+  const totalCodes = rowsArr.length;
+  const doneCodes = rowsArr.filter(g=>g.fullyCounted);
+  const partialCodes = rowsArr.filter(g=>g.status==='partial');
+  const notStarted = rowsArr.filter(g=>g.status==='uncounted');
+  const mismatchCodes = doneCodes.filter(g=>g.diff!==0);
+
+  container.appendChild(el('div','section-title',`เปรียบเทียบตามรหัสสินค้า — ${round.id}<div class="line"></div>`));
+  const grid = el('div','kpi-grid');
+  grid.appendChild(kpiCard('รหัสสินค้าทั้งหมด', num(totalCodes)));
+  grid.appendChild(kpiCard('นับครบทุกตำแหน่งแล้ว', num(doneCodes.length),'','green'));
+  grid.appendChild(kpiCard('นับบางส่วน', num(partialCodes.length),'','amber'));
+  grid.appendChild(kpiCard('ยังไม่ได้เริ่มนับ', num(notStarted.length),'','gray'));
+  grid.appendChild(kpiCard('นับครบแล้วแต่ยอดไม่ตรง', num(mismatchCodes.length),'','red'));
+  container.appendChild(grid);
+
+  const searchRow = el('div',''); searchRow.style.cssText='display:flex; gap:8px; margin:12px 0;';
+  const searchInp = document.createElement('input');
+  searchInp.type='text'; searchInp.placeholder='ค้นหารหัสสินค้าหรือชื่อ...'; searchInp.className='reason-edit-input'; searchInp.style.maxWidth='320px';
+  searchRow.appendChild(searchInp);
+  container.appendChild(searchRow);
+
+  const wrap = el('div','table-wrap'); const t = el('table');
+  t.innerHTML = `<thead><tr>${sortableTh('Product','code','byCode')}${sortableTh('ชื่อสินค้า','name','byCode')}${sortableTh('ประเภท','cat','byCode')}${sortableTh('ตำแหน่ง/LOT','rows','byCode',true)}${sortableTh('System Qty รวม','systemQty','byCode',true)}${sortableTh('Count Qty รวม','countQty','byCode',true)}${sortableTh('Diff','diff','byCode',true)}<th>สถานะ</th></tr></thead>`;
+  wrap.appendChild(t); container.appendChild(wrap);
+  const footerNote = el('div','footer-note',''); footerNote.style.display='none';
+  container.appendChild(footerNote);
+
+  function draw(){
+    const q = searchInp.value.trim().toLowerCase();
+    let list = rowsArr;
+    if(q) list = list.filter(g=> g.code.toLowerCase().includes(q) || (g.name||'').toLowerCase().includes(q));
+    const sorted = applySorting(list, 'byCode', {code:g=>g.code,name:g=>g.name,cat:g=>g.cat||'',rows:g=>g.rows,systemQty:g=>g.systemQty,countQty:g=>g.countQty,diff:g=>g.diff});
+    const finalSorted = getSort('byCode').key ? sorted : list.slice().sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff));
+    const tb = el('tbody');
+    finalSorted.slice(0,150).forEach(g=>{
+      const diffClass = g.diff>0?'pos':(g.diff<0?'neg':'');
+      const tr = el('tr');
+      const progressNote = g.status==='partial' ? `<div class="mini" style="color:var(--text-faint); margin-top:2px;">นับแล้ว ${g.rowsCounted}/${g.rows} ตำแหน่ง</div>` : '';
+      tr.innerHTML = `<td class="mono">${g.code}</td><td class="prodname" title="${g.name}">${g.name}</td><td class="mini">${g.cat||'-'}</td>
+        <td class="num mono">${g.rowsCounted}/${g.rows}</td>
+        <td class="num mono">${num(g.systemQty)}</td>
+        <td class="num mono">${g.rowsCounted>0?num(g.countQty):'-'}${progressNote}</td>
+        <td class="num mono ${g.fullyCounted?diffClass:''}">${g.fullyCounted ? (g.diff>0?'+':'')+num(g.diff) : '-'}</td><td></td>`;
+      tr.children[7].appendChild(statusBadge(g.status));
+      tb.appendChild(tr);
+    });
+    t.querySelector('tbody')?.remove();
+    t.appendChild(tb);
+    if(finalSorted.length>150){
+      footerNote.textContent = `แสดง 150 จาก ${finalSorted.length} รายการ`;
+      footerNote.style.display = '';
+    } else {
+      footerNote.style.display = 'none';
+    }
+    wireSortableHeaders(t, draw);
+  }
+  searchInp.oninput = draw;
+  draw();
 }
 
 // ============================================================
@@ -2851,7 +3282,34 @@ function reportValuation(){
   const rows = items.map((i,idx)=>[idx+1,i.c,i.n,i.cat,fmtLot(i),i.loc,i.qty,i.u,i.uc,Math.round(i.sv)]);
   return {headers, rows, title:'Stock Valuation Report'};
 }
-function statusLabelTH(s){ return {matched:'ตรง', mismatch:'ไม่ตรง', uncounted:'ยังไม่ได้นับ'}[s]||s; }
+function statusLabelTH(s){ return {matched:'ตรง', mismatch:'ไม่ตรง', uncounted:'ยังไม่ได้นับ', partial:'นับบางส่วน'}[s]||s; }
+
+// รายงาน Stock Count แบบสรุปตาม SKU — รวมทุกตำแหน่ง/LOT ของรหัสสินค้าเดียวกันเป็น 1 แถวเสมอ (เหมือนหน้า "เปรียบเทียบตามรหัสสินค้า")
+// ต่างจาก reportStockCount (รายงานเดิม) ที่แสดงทีละแถวตามตำแหน่ง/LOT — อันนี้ใช้เวลาต้องการดูภาพรวมระดับ SKU ล้วนๆ เพื่อเอาไปสรุป/ส่งผู้บริหาร
+function reportStockCountBySKU(){
+  const rawDetail = ACTIVE_ROUND ? (DETAIL_CACHE[ACTIVE_ROUND]||[]) : [];
+  const exceptions = ACTIVE_ROUND ? (EXC_CACHE[ACTIVE_ROUND]||[]) : [];
+  const detail = applyExceptionMatches(filterDetail(rawDetail), exceptions);
+  const byCode = new Map();
+  detail.forEach(i=>{
+    if(!byCode.has(i.code)) byCode.set(i.code, {code:i.code, name:i.name, cat:i.cat, systemQty:0, countQty:0, rows:0, rowsCounted:0});
+    const g = byCode.get(i.code);
+    g.systemQty += (i.systemQty||0);
+    g.rows += 1;
+    if(i.status!=='uncounted'){ g.rowsCounted += 1; g.countQty += (i.effQty||0); }
+  });
+  const list = Array.from(byCode.values()).map(g=>{
+    const fullyCounted = g.rowsCounted>0 && g.rowsCounted===g.rows;
+    const diff = g.countQty - g.systemQty;
+    let status = 'uncounted';
+    if(g.rowsCounted>0 && !fullyCounted) status = 'partial';
+    else if(fullyCounted) status = diff===0 ? 'matched' : 'mismatch';
+    return {...g, diff, fullyCounted, status};
+  }).sort((a,b)=> a.code.localeCompare(b.code));
+  const headers = ['ลำดับ','Product Code','ชื่อสินค้า','ประเภท','จำนวนตำแหน่ง/LOT ทั้งหมด','นับแล้ว (ตำแหน่ง/LOT)','System Qty รวม','Count Qty รวม','Diff','สถานะ'];
+  const rows = list.map((g,idx)=>[idx+1, g.code, g.name, g.cat||'-', g.rows, `${g.rowsCounted}/${g.rows}`, g.systemQty, g.rowsCounted>0?g.countQty:'-', g.fullyCounted?g.diff:'-', statusLabelTH(g.status)]);
+  return {headers, rows, title:`Stock Count Report by SKU — ${ACTIVE_ROUND||''}`};
+}
 
 // รหัส Location ตามเทมเพลต AppSheet "Check Stock" (คอลัมน์ LocationKey/LocationName ในไฟล์ต้นฉบับ)
 // ต้องส่ง Location เป็น "รหัส" (เช่น 002) ไม่ใช่ชื่อเต็ม เพราะ AppSheet ผูก dropdown Location กับรหัสนี้
@@ -2889,7 +3347,8 @@ function reportAppSheetCheckStock(){
 }
 
 const REPORTS = [
-  {id:'count', name:'Stock Count Report', desc:'สถานะการนับรายรายการของรอบที่เลือก', fn:reportStockCount, needsRound:true},
+  {id:'count', name:'Stock Count Report', desc:'สถานะการนับรายรายการของรอบที่เลือก (แยกตามตำแหน่ง/LOT)', fn:reportStockCount, needsRound:true},
+  {id:'countBySKU', name:'Stock Count Report by SKU', desc:'สถานะการนับสรุปตามรหัสสินค้า (SKU) — รวมทุกตำแหน่ง/LOT ของรหัสเดียวกันเป็น 1 แถว ของรอบที่เลือก', fn:reportStockCountBySKU, needsRound:true},
   {id:'variance', name:'Variance Report', desc:'รายการที่ผลต่างไม่ตรงของรอบที่เลือก พร้อมเหตุผล', fn:reportVariance, needsRound:true},
   {id:'expiry', name:'Expiry Report', desc:'สินค้าใกล้หมดอายุ/หมดอายุแล้ว ทั้งหมด', fn:reportExpiry, needsRound:false},
   {id:'nonmoving', name:'Non-Moving Stock Report', desc:'สินค้าไม่เคลื่อนไหว (Active=N) เรียงตามมูลค่า', fn:reportNonMoving, needsRound:false},
@@ -2969,7 +3428,7 @@ async function render(){
   const section = el('div','section active');
   content.appendChild(section);
   const fn = {dashboard:renderDashboard, value:renderValue, expiry:renderExpiry, nonmoving:renderNonMoving,
-    counts:renderCounts, mobile:renderMobile, review:renderReview, variance:renderVariance, audit:renderAudit,
+    counts:renderCounts, mobile:renderMobile, review:renderReview, variance:renderVariance, byCode:renderByCode, audit:renderAudit,
     import:renderImport, export:renderExport, exec:renderExecSummary}[state.tab];
   await fn(section);
   renderIdentityBar();
