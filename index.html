@@ -5,6 +5,48 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>งานแผนกบัญชี</title>
 <link rel="stylesheet" href="style.css">
+<style>
+  #policyAlertOverlay{
+    position:fixed; inset:0; background:rgba(20,20,20,.55);
+    display:none; align-items:center; justify-content:center;
+    z-index:9999; padding:16px;
+  }
+  #policyAlertOverlay.show{ display:flex; }
+  #policyAlertModal{
+    background:#fff; border-radius:14px; max-width:520px; width:100%;
+    max-height:80vh; overflow:hidden; display:flex; flex-direction:column;
+    box-shadow:0 20px 60px rgba(0,0,0,.35);
+  }
+  #policyAlertModal .pa-head{
+    padding:18px 22px; background:#B3261E; color:#fff;
+    display:flex; align-items:center; gap:10px;
+  }
+  #policyAlertModal .pa-head .pa-icon{ font-size:22px; }
+  #policyAlertModal .pa-head h3{ margin:0; font-size:17px; }
+  #policyAlertModal .pa-head p{ margin:2px 0 0; font-size:13px; opacity:.9; }
+  #policyAlertModal .pa-body{ padding:14px 22px; overflow-y:auto; }
+  #policyAlertModal .pa-item{
+    display:flex; justify-content:space-between; gap:10px;
+    padding:10px 0; border-bottom:1px solid #eee; font-size:14px;
+  }
+  #policyAlertModal .pa-item:last-child{ border-bottom:none; }
+  #policyAlertModal .pa-item .pa-name{ font-weight:600; color:#222; }
+  #policyAlertModal .pa-item .pa-sub{ font-size:12.5px; color:#777; margin-top:2px; }
+  #policyAlertModal .pa-badge{
+    align-self:center; font-size:12px; font-weight:600; padding:3px 9px;
+    border-radius:999px; white-space:nowrap;
+  }
+  #policyAlertModal .pa-badge.expired{ background:#FBE9E7; color:#B3261E; }
+  #policyAlertModal .pa-badge.expiring{ background:#FFF4DE; color:#B26A00; }
+  #policyAlertModal .pa-foot{
+    padding:14px 22px; display:flex; justify-content:flex-end; gap:10px;
+    border-top:1px solid #eee;
+  }
+  #policyAlertModal .pa-foot button{
+    border:none; border-radius:8px; padding:9px 16px; font-size:14px;
+    cursor:pointer; background:#B3261E; color:#fff;
+  }
+</style>
 </head>
 <body>
 <div id="app">
@@ -55,30 +97,93 @@
   </div>
 </div>
 
+<!-- Popup: กรมธรรม์ใกล้หมดอายุ/หมดอายุ -->
+<div id="policyAlertOverlay">
+  <div id="policyAlertModal">
+    <div class="pa-head">
+      <span class="pa-icon">⚠️</span>
+      <div>
+        <h3>แจ้งเตือนกรมธรรม์</h3>
+        <p id="paHeadSub">มีกรมธรรม์ที่ใกล้หมดอายุหรือหมดอายุแล้ว</p>
+      </div>
+    </div>
+    <div class="pa-body" id="paBody"></div>
+    <div class="pa-foot">
+      <button id="paCloseBtn">รับทราบ</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="firebase-config.js"></script>
 <script src="firebase-storage.js"></script>
 
 <script>
+const POLICY_KEY_PREFIX = 'policy:';
+const STORAGE_KEY_POLICIES_LEGACY = 'policies';
+
+function policyStatus(p, todayStr){
+  if(!p || !p.endDate) return 'none';
+  const days = Math.ceil((new Date(p.endDate) - new Date(todayStr)) / 86400000);
+  if(days < 0) return 'expired';
+  if(days <= 30) return 'expiring';
+  return 'active';
+}
+
+// โหลดกรมธรรม์ทั้งหมด: รองรับทั้งโครงสร้างใหม่ (เอกสารแยกคีย์ policy:<id>) และคีย์เดิม 'policies' (เผื่อยังไม่ migrate)
+async function loadAllPolicies(){
+  let keys = [];
+  try{
+    const listResult = await window.storage.list(POLICY_KEY_PREFIX);
+    keys = (listResult && listResult.keys) || [];
+  }catch(e){ keys = []; }
+
+  if(keys.length > 0){
+    const items = await Promise.all(keys.map(async k => {
+      try{ const r = await window.storage.get(k); return JSON.parse(r.value); }
+      catch(e){ return null; }
+    }));
+    return items.filter(Boolean);
+  }
+
+  try{
+    const legacy = await window.storage.get(STORAGE_KEY_POLICIES_LEGACY);
+    return legacy ? JSON.parse(legacy.value) : [];
+  }catch(e){ return []; }
+}
+
+function assetLabel(asset){
+  if(!asset) return 'ไม่พบข้อมูลทรัพย์สิน';
+  if(asset.type === 'vehicle') return `${asset.name || 'รถยนต์'}${asset.plate ? ' · ' + asset.plate : ''}`;
+  return asset.name || 'โรงงาน';
+}
+function policySub(p){
+  const parts = [];
+  if (p.insurer) parts.push(p.insurer);
+  if (p.policyNumber) parts.push('เลขที่ ' + p.policyNumber);
+  if (p.insClass) parts.push(p.insClass);
+  return parts.join(' · ');
+}
+function daysLabel(p, todayStr){
+  const days = Math.ceil((new Date(p.endDate) - new Date(todayStr)) / 86400000);
+  return days < 0 ? `หมดอายุแล้ว ${Math.abs(days)} วัน` : `เหลืออีก ${days} วัน (หมดอายุ ${p.endDate})`;
+}
+
 async function loadSummary(){
   let assets = [], policies = [], items = [];
   try{ const a = await window.storage.get('assets'); assets = a ? JSON.parse(a.value) : []; }catch(e){}
-  try{ const p = await window.storage.get('policies'); policies = p ? JSON.parse(p.value) : []; }catch(e){}
+  try{ policies = await loadAllPolicies(); }catch(e){ policies = []; }
   try{ const eq = await window.storage.get('equipment'); items = eq ? JSON.parse(eq.value) : []; }catch(e){}
 
   const todayStr = new Date().toISOString().slice(0,10);
-  const policyStatus = (p) => {
-    if(!p || !p.endDate) return 'none';
-    const days = Math.ceil((new Date(p.endDate) - new Date(todayStr)) / 86400000);
-    if(days < 0) return 'expired';
-    if(days <= 30) return 'expiring';
-    return 'active';
-  };
 
   const vehicles = assets.filter(a => a.type === 'vehicle').length;
   const factories = assets.filter(a => a.type === 'factory').length;
-  const alerts = policies.filter(p => policyStatus(p) === 'expiring' || policyStatus(p) === 'expired').length;
+  const alertPolicies = policies.filter(p => {
+    const s = policyStatus(p, todayStr);
+    return s === 'expiring' || s === 'expired';
+  });
 
   const el = document.getElementById('statsRow');
   if(assets.length === 0 && policies.length === 0 && items.length === 0){
@@ -89,9 +194,44 @@ async function loadSummary(){
     <span><b>${items.length.toLocaleString('th-TH')}</b> รายการทรัพย์สินที่ลงทะเบียน</span>
     <span><b>${vehicles.toLocaleString('th-TH')}</b> รถยนต์ที่ทำประกัน</span>
     <span><b>${factories.toLocaleString('th-TH')}</b> โรงงานที่ทำประกัน</span>
-    <span><b>${alerts.toLocaleString('th-TH')}</b> กรมธรรม์ใกล้หมดอายุ/หมดอายุ</span>
+    <span><b>${alertPolicies.length.toLocaleString('th-TH')}</b> กรมธรรม์ใกล้หมดอายุ/หมดอายุ</span>
   `;
+
+  showPolicyAlertPopup(alertPolicies, assets, todayStr);
 }
+
+function showPolicyAlertPopup(alertPolicies, assets, todayStr){
+  if (!alertPolicies || alertPolicies.length === 0) return;
+
+  const expiredCount = alertPolicies.filter(p => policyStatus(p, todayStr) === 'expired').length;
+  const expiringCount = alertPolicies.length - expiredCount;
+  document.getElementById('paHeadSub').textContent =
+    `หมดอายุแล้ว ${expiredCount} รายการ · ใกล้หมดอายุ (ภายใน 30 วัน) ${expiringCount} รายการ`;
+
+  // เรียงกรมธรรม์ที่หมดอายุแล้วขึ้นก่อน แล้วเรียงตามวันหมดอายุใกล้สุด
+  const sorted = alertPolicies.slice().sort((a,b) => new Date(a.endDate) - new Date(b.endDate));
+
+  const body = document.getElementById('paBody');
+  body.innerHTML = sorted.map(p => {
+    const status = policyStatus(p, todayStr);
+    const asset = assets.find(a => a.id === p.assetId);
+    return `
+      <div class="pa-item">
+        <div>
+          <div class="pa-name">${assetLabel(asset)}</div>
+          <div class="pa-sub">${policySub(p)}</div>
+          <div class="pa-sub">${daysLabel(p, todayStr)}</div>
+        </div>
+        <span class="pa-badge ${status}">${status === 'expired' ? 'หมดอายุ' : 'ใกล้หมดอายุ'}</span>
+      </div>`;
+  }).join('');
+
+  const overlay = document.getElementById('policyAlertOverlay');
+  overlay.classList.add('show');
+  document.getElementById('paCloseBtn').onclick = () => overlay.classList.remove('show');
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.classList.remove('show'); };
+}
+
 loadSummary();
 </script>
 </body>
