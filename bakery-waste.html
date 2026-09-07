@@ -175,6 +175,14 @@
   .wt-ledger-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
   .wt-filter-row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
   .wt-filter-row input[type=date] { width: auto; min-width: 128px; }
+  .wt-filter-row select {
+    background: var(--surface-2); border: 1.5px solid var(--border); color: var(--text);
+    border-radius: var(--r-sm); padding: 10px 12px; font-size: 14px; font-family: 'Prompt', sans-serif;
+    outline: none; width: auto; min-width: 132px; cursor: pointer;
+    transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+  }
+  .wt-filter-row select:hover { border-color: #CBD5E1; }
+  .wt-filter-row select:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-ring); }
   .wt-search-input { flex: 1; min-width: 140px; }
   .wt-filter-sep { color: var(--text-faint); font-size: 12px; }
   .wt-csv-btn {
@@ -327,7 +335,7 @@
     .wt-gauge-label { width: 100%; margin-bottom: 1px; }
     .wt-gauge-val { width: auto; margin-left: 8px; }
     .wt-filter-row { flex-direction: column; align-items: stretch; }
-    .wt-filter-row input, .wt-filter-row .wt-search-input { width: 100%; min-width: 0; }
+    .wt-filter-row input, .wt-filter-row select, .wt-filter-row .wt-search-input { width: 100%; min-width: 0; }
     .wt-filter-sep { display: none; }
     .wt-source-table .name-cell { max-width: 90px; }
     .wt-lb-nav { width: 38px; height: 38px; font-size: 18px; }
@@ -435,6 +443,7 @@
     ledgerSearch: "",
     ledgerDateFrom: "",
     ledgerDateTo: "",
+    ledgerStatusFilter: "",
     rangeStart: daysAgo(29),
     rangeEnd: todayStr(),
     productSearch: "",
@@ -449,6 +458,7 @@
     prodLogSearch: "",
     prodLogDateFrom: "",
     prodLogDateTo: "",
+    prodLogStatusFilter: "",
     prodFormDefaults: { date: todayStr() },
     prodLightboxLogId: null,
     prodLightboxIndex: 0
@@ -904,10 +914,16 @@
   function getFilteredLedgerEntries() {
     var q = state.ledgerSearch.trim().toLowerCase();
     var from = state.ledgerDateFrom, to = state.ledgerDateTo;
+    var statusFilter = state.ledgerStatusFilter;
     return state.entries
       .filter(function (e) {
         if (from && e.date < from) return false;
         if (to && e.date > to) return false;
+        if (statusFilter) {
+          var hasRootCause = e.rootCause && e.rootCause.trim();
+          var statusKey = hasRootCause ? "done" : "pending";
+          if (statusFilter !== statusKey) return false;
+        }
         if (q) {
           var hay = [e.productName, e.productCode, e.note, e.line, e.method].join(" ").toLowerCase();
           if (hay.indexOf(q) === -1) return false;
@@ -985,10 +1001,16 @@
   function getFilteredProdLogs() {
     var q = state.prodLogSearch.trim().toLowerCase();
     var from = state.prodLogDateFrom, to = state.prodLogDateTo;
+    var statusFilter = state.prodLogStatusFilter;
     return state.productionLogs
       .filter(function (p) {
         if (from && p.date < from) return false;
         if (to && p.date > to) return false;
+        if (statusFilter) {
+          var hasResult = p.result && p.result.trim();
+          var statusKey = hasResult ? "done" : "pending";
+          if (statusFilter !== statusKey) return false;
+        }
         if (q) {
           var hay = [p.item, p.solution, p.result].join(" ").toLowerCase();
           if (hay.indexOf(q) === -1) return false;
@@ -1069,7 +1091,7 @@
 
     var filteredLogs = getFilteredProdLogs();
     var rowsHtml = renderProdLogRowsHtml(filteredLogs);
-    var hasFilter = state.prodLogSearch || state.prodLogDateFrom || state.prodLogDateTo;
+    var hasFilter = state.prodLogSearch || state.prodLogDateFrom || state.prodLogDateTo || state.prodLogStatusFilter;
 
     return (
       '<div class="wt-entry-grid">' +
@@ -1113,6 +1135,11 @@
             '<input type="date" id="prodLogDateFromField" value="' + esc(state.prodLogDateFrom) + '" title="จากวันที่">' +
             '<span class="wt-filter-sep">–</span>' +
             '<input type="date" id="prodLogDateToField" value="' + esc(state.prodLogDateTo) + '" title="ถึงวันที่">' +
+            '<select id="prodLogStatusField" title="กรองตามสถานะ">' +
+              '<option value=""' + (state.prodLogStatusFilter === "" ? " selected" : "") + '>ทุกสถานะ</option>' +
+              '<option value="pending"' + (state.prodLogStatusFilter === "pending" ? " selected" : "") + '>รอสรุปผล</option>' +
+              '<option value="done"' + (state.prodLogStatusFilter === "done" ? " selected" : "") + '>แก้ไขเสร็จสิ้น</option>' +
+            "</select>" +
             (hasFilter ? '<button type="button" class="wt-link" data-action="clearProdLogFilter">ล้างตัวกรอง</button>' : "") +
           "</div>" +
           '<div class="wt-hint" id="prodLogCountText" style="margin:0 0 8px;">พบ ' + filteredLogs.length + " จากทั้งหมด " + state.productionLogs.length + " รายการ</div>" +
@@ -1156,7 +1183,7 @@
 
     var filteredEntries = getFilteredLedgerEntries();
     var rowsHtml = renderLedgerRowsHtml(filteredEntries);
-    var hasFilter = state.ledgerSearch || state.ledgerDateFrom || state.ledgerDateTo;
+    var hasFilter = state.ledgerSearch || state.ledgerDateFrom || state.ledgerDateTo || state.ledgerStatusFilter;
 
     return (
       '<div class="wt-entry-grid">' +
@@ -1224,6 +1251,11 @@
             '<input type="date" id="ledgerDateFromField" value="' + esc(state.ledgerDateFrom) + '" title="จากวันที่">' +
             '<span class="wt-filter-sep">–</span>' +
             '<input type="date" id="ledgerDateToField" value="' + esc(state.ledgerDateTo) + '" title="ถึงวันที่">' +
+            '<select id="ledgerStatusField" title="กรองตามสถานะ">' +
+              '<option value=""' + (state.ledgerStatusFilter === "" ? " selected" : "") + '>ทุกสถานะ</option>' +
+              '<option value="pending"' + (state.ledgerStatusFilter === "pending" ? " selected" : "") + '>รอ PD Confirm</option>' +
+              '<option value="done"' + (state.ledgerStatusFilter === "done" ? " selected" : "") + '>เสร็จสมบูรณ์</option>' +
+            "</select>" +
             (hasFilter ? '<button type="button" class="wt-link" data-action="clearLedgerFilter">ล้างตัวกรอง</button>' : "") +
           "</div>" +
           '<div class="wt-hint" id="ledgerCountText" style="margin:0 0 8px;">พบ ' + filteredEntries.length + " จากทั้งหมด " + state.entries.length + " รายการ</div>" +
@@ -2044,7 +2076,7 @@
       case "removePhoto": handleRemovePhoto(parseInt(el.getAttribute("data-index"), 10)); break;
       case "exportCsv": exportCsv(); break;
       case "clearLedgerFilter":
-        state.ledgerSearch = ""; state.ledgerDateFrom = ""; state.ledgerDateTo = "";
+        state.ledgerSearch = ""; state.ledgerDateFrom = ""; state.ledgerDateTo = ""; state.ledgerStatusFilter = "";
         render(); break;
       case "editProdLog":
         var editProdTarget = state.productionLogs.find(function (x) { return x.id === el.getAttribute("data-id"); });
@@ -2087,7 +2119,7 @@
         }
         break;
       case "clearProdLogFilter":
-        state.prodLogSearch = ""; state.prodLogDateFrom = ""; state.prodLogDateTo = "";
+        state.prodLogSearch = ""; state.prodLogDateFrom = ""; state.prodLogDateTo = ""; state.prodLogStatusFilter = "";
         render(); break;
       case "exportProdXlsx": exportProdLogsXlsx(); break;
       case "printProdReport": buildAndOpenProdLogPrint(); break;
@@ -2155,8 +2187,10 @@
     else if (e.target.id === "prodPhotoInput") handleProdPhotoChange(e.target);
     else if (e.target.id === "ledgerDateFromField") { state.ledgerDateFrom = e.target.value; render(); }
     else if (e.target.id === "ledgerDateToField") { state.ledgerDateTo = e.target.value; render(); }
+    else if (e.target.id === "ledgerStatusField") { state.ledgerStatusFilter = e.target.value; render(); }
     else if (e.target.id === "prodLogDateFromField") { state.prodLogDateFrom = e.target.value; render(); }
     else if (e.target.id === "prodLogDateToField") { state.prodLogDateTo = e.target.value; render(); }
+    else if (e.target.id === "prodLogStatusField") { state.prodLogStatusFilter = e.target.value; render(); }
     else if (e.target.id === "dashStartField") { state.rangeStart = e.target.value; state.range = "custom"; render(); }
     else if (e.target.id === "dashEndField") { state.rangeEnd = e.target.value; state.range = "custom"; render(); }
     else if (e.target.id === "printStartDate") {
