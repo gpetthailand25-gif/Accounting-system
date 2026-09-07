@@ -1708,8 +1708,6 @@ async function renderExecSummary(container){
   const skus = Array.from(skuMap.values()).map(g=> ({...g, active: g.hasActive}));
 
   const totalValue = skus.reduce((a,g)=>a+g.value,0);
-  const activeSKU = skus.filter(g=>g.active);
-  const inactiveSKU = skus.filter(g=>!g.active); // SKU ที่ไม่ active เลยแม้แต่ตำแหน่ง/LOT เดียว
   const sumVal = arr => arr.reduce((a,g)=>a+g.value,0);
 
   // ความเสี่ยงด้านวันหมดอายุ: นับเป็น "จำนวนแถว LOT/ตำแหน่งที่หมดอายุจริง" (เหมือนหน้า "สินค้าใกล้หมดอายุ")
@@ -1722,8 +1720,15 @@ async function renderExecSummary(container){
   const near90Rows = expiryItems.filter(i=>i.dte!=null && i.dte>60 && i.dte<=90);
   const sumRowVal = arr => arr.reduce((a,i)=>a+i.sv,0);
 
+  // สินค้าไม่เคลื่อนไหว: นับเป็น "จำนวนแถว LOT/ตำแหน่งที่ Active=N จริง" (เหมือนหน้า "สินค้าไม่เคลื่อนไหว") ไม่ใช่รวมเป็น SKU
+  // เดิมนับแบบ SKU (ต้องไม่ active ทุกตำแหน่งของ SKU นั้นถึงจะนับ) ทำให้ SKU ที่มีบางตำแหน่ง active/บางตำแหน่งไม่ active
+  // ถูกตัดออกทั้ง SKU มูลค่าของแถวที่ไม่ active จริงๆ ในนั้นเลยหายไปจากยอดรวม ไม่ตรงกับหน้า "สินค้าไม่เคลื่อนไหว" ที่นับทีละแถว
+  const activeRows = items.filter(i=>i.active!==false);
+  const inactiveRows = items.filter(i=>i.active===false);
+  const sumRowVal2 = arr => arr.reduce((a,i)=>a+i.sv,0);
+
   container.appendChild(printHeader('สรุปรายงานสต็อกสำหรับผู้บริหาร (Executive Summary) — สรุปตามจำนวน SKU'));
-  const titleRow = el('div','section-title','🚦 สรุปสถานะโดยรวม <span class="mini" style="margin-left:6px; text-transform:none; font-weight:400;">สินค้าหมดอายุนับตามจำนวนแถว LOT/ตำแหน่ง · สินค้าไม่เคลื่อนไหวนับตามจำนวน SKU</span><div class="line"></div>');
+  const titleRow = el('div','section-title','🚦 สรุปสถานะโดยรวม <span class="mini" style="margin-left:6px; text-transform:none; font-weight:400;">สินค้าหมดอายุ/ไม่เคลื่อนไหวนับตามจำนวนแถว LOT/ตำแหน่ง (ค่าอื่นในหน้านี้นับตามจำนวน SKU)</span><div class="line"></div>');
   container.appendChild(titleRow);
   titleRow.appendChild(printButton('พิมพ์รายงานผู้บริหารเป็น PDF'));
 
@@ -1754,10 +1759,10 @@ async function renderExecSummary(container){
     near90Rows.length===0 ? 'ไม่มีรายการใกล้หมดอายุ' : `${num(near90Rows.length)} รายการ (${money(sumRowVal(near90Rows))})`
   ));
   statusRow.appendChild(statusChip(
-    inactiveSKU.length===0 ? 'ok' : 'warn',
-    inactiveSKU.length===0 ? '✅' : '⚠️',
+    inactiveRows.length===0 ? 'ok' : 'warn',
+    inactiveRows.length===0 ? '✅' : '⚠️',
     'สินค้าไม่เคลื่อนไหว',
-    inactiveSKU.length===0 ? 'ไม่มี SKU' : `${num(inactiveSKU.length)} SKU (${money(sumVal(inactiveSKU))})`
+    inactiveRows.length===0 ? 'ไม่มีรายการ' : `${num(inactiveRows.length)} รายการ (${money(sumRowVal2(inactiveRows))})`
   ));
   container.appendChild(statusRow);
 
@@ -1765,8 +1770,8 @@ async function renderExecSummary(container){
   const grid = el('div','kpi-grid');
   grid.appendChild(kpiCard('💰 มูลค่าสต็อกรวมทั้งหมด', money(totalValue)));
   grid.appendChild(kpiCard('📦 จำนวน SKU ทั้งหมด', num(skus.length)));
-  grid.appendChild(kpiCard('✅ มูลค่าสินค้า Active', money(sumVal(activeSKU)),'','green'));
-  grid.appendChild(kpiCard('❌ มูลค่าสินค้าไม่ Active', money(sumVal(inactiveSKU)),'','red'));
+  grid.appendChild(kpiCard('✅ มูลค่าสินค้า Active', money(sumRowVal2(activeRows)),'','green'));
+  grid.appendChild(kpiCard('❌ มูลค่าสินค้าไม่ Active', money(sumRowVal2(inactiveRows)),'','red'));
   container.appendChild(grid);
 
   container.appendChild(el('div','section-title','⏰ ความเสี่ยงด้านวันหมดอายุ (ทุกประเภทยกเว้นบรรจุภัณฑ์) <span class="mini" style="margin-left:6px; text-transform:none; font-weight:400;">นับเป็นจำนวนแถว LOT/ตำแหน่งที่หมดอายุจริง (เหมือนหน้า "สินค้าใกล้หมดอายุ") ไม่ใช่นับรวมเป็น SKU</span><div class="line"></div>'));
@@ -1781,10 +1786,10 @@ async function renderExecSummary(container){
   gridExp.appendChild(kpiCard((near90Rows.length===0?'✅':'👀')+' จำนวนรายการใกล้หมดอายุ (61-90 วัน)', num(near90Rows.length),'','blue'));
   container.appendChild(gridExp);
 
-  container.appendChild(el('div','section-title','📉 สินค้าไม่เคลื่อนไหว (Active = N) <span class="mini" style="margin-left:6px; text-transform:none; font-weight:400;">SKU ที่ไม่ active แม้แต่ตำแหน่ง/LOT เดียว</span><div class="line"></div>'));
+  container.appendChild(el('div','section-title','📉 สินค้าไม่เคลื่อนไหว (Active = N) <span class="mini" style="margin-left:6px; text-transform:none; font-weight:400;">นับเป็นจำนวนแถว LOT/ตำแหน่งที่ Active=N จริง (เหมือนหน้า "สินค้าไม่เคลื่อนไหว") ไม่ใช่นับรวมเป็น SKU</span><div class="line"></div>'));
   const gridNM = el('div','kpi-grid');
-  gridNM.appendChild(kpiCard((inactiveSKU.length===0?'✅':'⚠️')+' มูลค่า SKU ไม่เคลื่อนไหว', money(sumVal(inactiveSKU)),'','red'));
-  gridNM.appendChild(kpiCard((inactiveSKU.length===0?'✅':'⚠️')+' จำนวน SKU ไม่เคลื่อนไหว', num(inactiveSKU.length),'','red'));
+  gridNM.appendChild(kpiCard((inactiveRows.length===0?'✅':'⚠️')+' มูลค่ารายการไม่เคลื่อนไหว', money(sumRowVal2(inactiveRows)),'','red'));
+  gridNM.appendChild(kpiCard((inactiveRows.length===0?'✅':'⚠️')+' จำนวนรายการไม่เคลื่อนไหว', num(inactiveRows.length),'','red'));
   container.appendChild(gridNM);
 
   if(ACTIVE_ROUND){
