@@ -696,7 +696,7 @@ function itemFormHtml(itemId){
         </div>
         <div class="field">
           <label>มูลค่า (บาท)</label>
-          <input type="number" name="value" placeholder="0" value="${escapeAttr(editing?.value||'')}">
+          <input type="number" name="value" placeholder="0" step="0.01" value="${escapeAttr(editing?.value||'')}">
           ${cat === 'ทรัพย์สินที่ไม่ลงทะเบียน' ? `<p style="font-size:11px;color:var(--ink-soft);margin:2px 0 0;">หมวดนี้ควรมีมูลค่าต่ำกว่า 10,000 บาท</p>` : ''}
         </div>
         <div class="field full">
