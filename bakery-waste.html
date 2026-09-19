@@ -8,12 +8,12 @@
   @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
   :root {
-    /* ---- surfaces ---- */
-    --bg: #F8FAFC;            /* page / app base */
-    --surface: #FFFFFF;       /* cards, panels, tables */
-    --surface-2: #FFFFFF;     /* inputs, nested white surfaces */
-    --table-head: #F1F5F9;    /* table header background */
-    --border: #E2E8F0;        /* hairline borders */
+    /* ---- surfaces: white cards floating on soft slate-gray page ---- */
+    --bg: #F1F5F9;             /* page base — slate-100 */
+    --surface: #FFFFFF;        /* cards, panels, tables — pure white */
+    --surface-2: #F8FAFC;      /* soft filled inputs — slate-50, no border needed */
+    --table-head: #F8FAFC;     /* table header background — slate-50 */
+    --border: #EEF2F6;         /* ultra-soft hairline, used sparingly (row dividers only) */
 
     /* ---- text ---- */
     --text: #0F172A;          /* headings / strong text */
@@ -32,18 +32,23 @@
     --warn: #D97706;
     --danger: #DC2626;
     --danger-dim: #FEE2E2;
-    --good: #16A34A;
-    --good-dim: #DCFCE7;
+    --good: #059669;
+    --good-dim: #ECFDF5;
 
-    /* ---- elevation ---- */
-    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
-    --shadow-md: 0 10px 15px -3px rgba(15, 23, 42, 0.06), 0 4px 6px -2px rgba(15, 23, 42, 0.03);
-    --shadow-lg: 0 20px 30px -10px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+    /* ---- status pill pairs (bg / text) — emerald for done, amber for pending ---- */
+    --status-done-bg: #ECFDF5;    --status-done-text: #047857;
+    --status-pending-bg: #FFFBEB; --status-pending-text: #B45309;
 
-    /* ---- radius ---- */
-    --r-lg: 16px;
-    --r-md: 12px;
-    --r-sm: 8px;
+    /* ---- elevation: soft, diffuse — never harsh ---- */
+    --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow-sm: 0 2px 6px rgba(15, 23, 42, 0.05);
+    --shadow-md: 0 10px 24px -8px rgba(15, 23, 42, 0.10), 0 2px 6px -2px rgba(15, 23, 42, 0.04);
+    --shadow-lg: 0 24px 48px -14px rgba(15, 23, 42, 0.16), 0 8px 16px -8px rgba(15, 23, 42, 0.06);
+
+    /* ---- radius: generous, rounded-xl everywhere ---- */
+    --r-lg: 22px;
+    --r-md: 16px;
+    --r-sm: 12px;
     --r-pill: 999px;
 
     --ease: cubic-bezier(0.4, 0, 0.2, 1);
@@ -56,7 +61,7 @@
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
-    padding: 32px 24px;
+    padding: 36px 24px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
   }
@@ -67,15 +72,17 @@
     background: var(--bg);
     border-radius: var(--r-lg);
     overflow: hidden;
-    border: 1px solid var(--border);
+    border: none;
     box-shadow: var(--shadow-lg);
   }
   @media (max-width: 1620px) { #app { max-width: 96vw; } }
 
   .wt-header {
-    padding: 26px 32px 0;
-    border-bottom: 1px solid var(--border);
+    padding: 30px 36px 0;
+    border-bottom: none;
     background: var(--surface);
+    box-shadow: var(--shadow-xs);
+    position: relative; z-index: 2;
   }
   .wt-eyebrow {
     font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.12em;
@@ -86,11 +93,11 @@
   .wt-eyebrow::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-dim); flex-shrink: 0; }
   .wt-title {
     font-family: 'Prompt', sans-serif; font-weight: 700; font-size: clamp(22px, 4vw, 28px);
-    margin: 0 0 20px; color: var(--text); letter-spacing: -0.01em;
+    margin: 0 0 24px; color: var(--text); letter-spacing: -0.01em;
   }
   .wt-tabs { display: flex; gap: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
   .wt-tab {
-    font-size: 14px; font-weight: 600; font-family: inherit; padding: 12px 20px;
+    font-size: 14px; font-weight: 600; font-family: inherit; padding: 13px 22px;
     border-radius: var(--r-sm) var(--r-sm) 0 0; background: transparent; border: none;
     border-bottom: 2.5px solid transparent; color: var(--text-muted); cursor: pointer;
     transition: color 0.2s var(--ease), background 0.2s var(--ease), border-color 0.2s var(--ease);
@@ -99,164 +106,168 @@
   .wt-tab.active { color: var(--accent-soft); background: var(--accent-dim); border-bottom-color: var(--accent); }
   .wt-tab:hover:not(.active) { color: var(--text); background: var(--table-head); }
 
-  .wt-body { padding: 28px 32px 36px; background: var(--bg); }
+  .wt-body { padding: 32px 36px 40px; background: var(--bg); }
 
-  .wt-entry-grid { display: grid; grid-template-columns: 380px 1fr; gap: 20px; }
+  .wt-entry-grid { display: grid; grid-template-columns: 400px 1fr; gap: 24px; }
   @media (max-width: 900px) { .wt-entry-grid { grid-template-columns: 1fr; } }
 
   .wt-card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
-    padding: 22px; box-shadow: var(--shadow-md); min-width: 0;
+    background: var(--surface); border: none; border-radius: var(--r-md);
+    padding: 28px; box-shadow: var(--shadow-md); min-width: 0;
     transition: box-shadow 0.2s var(--ease);
   }
   .wt-card h3 {
     font-family: 'Prompt', sans-serif; font-size: 15px; font-weight: 600; letter-spacing: 0.01em;
-    text-transform: uppercase; margin: 0 0 16px; padding-left: 12px;
+    text-transform: uppercase; margin: 0 0 20px; padding-left: 12px;
     border-left: 3px solid var(--accent); color: var(--text);
   }
-  .wt-field { margin-bottom: 14px; }
-  .wt-field label { display: block; font-size: 12.5px; color: var(--text-muted); margin-bottom: 6px; font-weight: 500; }
+  .wt-field { margin-bottom: 18px; }
+  .wt-field label { display: block; font-size: 12.5px; color: var(--text-muted); margin-bottom: 7px; font-weight: 500; }
   .wt-field input, .wt-field select, .wt-field textarea {
-    width: 100%; background: var(--surface-2); border: 1.5px solid var(--border); color: var(--text);
-    border-radius: var(--r-sm); padding: 11px 13px; font-size: 15px; font-family: 'Prompt', sans-serif;
+    width: 100%; background: var(--surface-2); border: 1.5px solid transparent; color: var(--text);
+    border-radius: var(--r-sm); padding: 12px 14px; font-size: 15px; font-family: 'Prompt', sans-serif;
     outline: none; transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease), background 0.2s var(--ease);
   }
-  .wt-field input:hover, .wt-field select:hover, .wt-field textarea:hover { border-color: #CBD5E1; }
+  .wt-field input:hover, .wt-field select:hover, .wt-field textarea:hover { border-color: #E2E8F0; }
 
   .wt-combo { position: relative; }
   .wt-combo-list {
-    position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; right: 0;
-    background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-sm);
+    position: absolute; z-index: 40; top: calc(100% + 8px); left: 0; right: 0;
+    background: var(--surface); border: none; border-radius: var(--r-sm);
     box-shadow: var(--shadow-lg); max-height: 220px; overflow-y: auto;
   }
-  .wt-combo-item { padding: 10px 13px; cursor: pointer; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; transition: background 0.15s var(--ease); }
+  .wt-combo-item { padding: 11px 14px; cursor: pointer; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; transition: background 0.15s var(--ease); }
   .wt-combo-item:hover, .wt-combo-item.active { background: var(--accent-dim); }
   .wt-combo-item .name { color: var(--text); }
   .wt-combo-item .code { color: var(--text-muted); font-family: 'IBM Plex Mono', monospace; font-size: 11px; flex-shrink: 0; }
-  .wt-combo-empty { padding: 12px 13px; font-size: 12.5px; color: var(--text-muted); }
-  .wt-field input:focus, .wt-field select:focus, .wt-field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-ring); background: #FFFDF7; }
+  .wt-combo-empty { padding: 12px 14px; font-size: 12.5px; color: var(--text-muted); }
+  .wt-field input:focus, .wt-field select:focus, .wt-field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-ring); background: #FFFFFF; }
   .wt-field input:disabled { opacity: 0.55; background: var(--table-head); }
-  .wt-hint { font-size: 11.5px; color: var(--text-muted); margin-top: 5px; }
+  .wt-hint { font-size: 11.5px; color: var(--text-muted); margin-top: 6px; }
   .wt-link { color: var(--accent-soft); cursor: pointer; text-decoration: underline; background: none; border: none; padding: 0; font-size: 11.5px; font-family: inherit; font-weight: 500; }
   .wt-link:hover { color: var(--accent-hover); }
-  .wt-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .wt-row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
-  .wt-error { font-size: 12.5px; color: var(--danger); margin: -6px 0 12px; min-height: 1px; font-weight: 500; }
+  .wt-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .wt-row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+  .wt-error { font-size: 12.5px; color: var(--danger); margin: -8px 0 14px; min-height: 1px; font-weight: 500; }
 
+  /* ---- Hero banner for "มูลค่าของเสียรวม": big premium highlight ---- */
   .wt-total-box {
-    background: var(--accent-dim); border: 1.5px solid var(--accent); border-radius: var(--r-sm);
-    padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+    border: none; border-radius: var(--r-md);
+    padding: 18px 22px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;
+    box-shadow: 0 12px 26px -10px rgba(217, 119, 6, 0.55);
   }
-  .wt-total-box .lbl { font-size: 12.5px; color: var(--accent-soft); font-weight: 500; }
-  .wt-total-box .val { font-family: 'IBM Plex Mono', monospace; font-size: 19px; color: var(--accent-soft); font-weight: 600; }
+  .wt-total-box .lbl { font-size: 12px; color: rgba(255,255,255,0.88); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+  .wt-total-box .val { font-family: 'IBM Plex Mono', monospace; font-size: 26px; color: #FFFFFF; font-weight: 700; }
 
-  .wt-photo-zone { border: 1.5px dashed var(--border); border-radius: var(--r-sm); padding: 14px; text-align: center; background: var(--table-head); margin-bottom: 4px; transition: border-color 0.2s var(--ease), background 0.2s var(--ease); }
+  .wt-photo-zone { border: 1.5px dashed #E2E8F0; border-radius: var(--r-sm); padding: 16px; text-align: center; background: var(--surface-2); margin-bottom: 4px; transition: border-color 0.2s var(--ease), background 0.2s var(--ease); }
   .wt-photo-zone input[type=file] { display: none; }
-  .wt-photo-label { display: inline-block; font-size: 13px; color: var(--accent-soft); cursor: pointer; font-weight: 600; border: 1.5px solid var(--accent); padding: 8px 16px; border-radius: var(--r-sm); background: var(--surface-2); transition: background 0.2s var(--ease), transform 0.1s var(--ease); }
-  .wt-photo-label:hover { background: var(--accent-dim); }
+  .wt-photo-label { display: inline-block; font-size: 13px; color: var(--accent-soft); cursor: pointer; font-weight: 600; border: none; padding: 9px 18px; border-radius: var(--r-sm); background: var(--accent-dim); transition: background 0.2s var(--ease), transform 0.1s var(--ease); }
+  .wt-photo-label:hover { background: #FDE9B8; }
   .wt-photo-label:active { transform: translateY(1px); }
-  .wt-photo-preview-list { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; justify-content: center; min-height: 0; }
+  .wt-photo-preview-list { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; justify-content: center; min-height: 0; }
   .wt-photo-preview { position: relative; display: inline-block; }
-  .wt-photo-preview img { width: 78px; height: 78px; object-fit: cover; border-radius: var(--r-sm); border: 3px solid var(--surface); outline: 1px solid var(--border); box-shadow: var(--shadow-md); }
+  .wt-photo-preview img { width: 78px; height: 78px; object-fit: cover; border-radius: var(--r-sm); border: 3px solid var(--surface); box-shadow: var(--shadow-md); }
   .wt-photo-remove { position: absolute; top: -8px; right: -8px; background: var(--danger); color: #fff; border: 2px solid var(--surface); border-radius: 50%; width: 22px; height: 22px; font-size: 11px; cursor: pointer; line-height: 1; box-shadow: var(--shadow-sm); transition: transform 0.15s var(--ease); }
   .wt-photo-remove:hover { transform: scale(1.1); }
 
   .wt-submit {
     width: 100%; background: var(--accent); color: #FFFFFF; font-weight: 600; border: none;
-    border-radius: var(--r-sm); padding: 13px; font-size: 15px; cursor: pointer; margin-top: 6px;
+    border-radius: var(--r-sm); padding: 14px; font-size: 15px; cursor: pointer; margin-top: 8px;
     font-family: 'Prompt', sans-serif; transition: background 0.2s var(--ease), transform 0.1s var(--ease), box-shadow 0.2s var(--ease);
-    box-shadow: 0 4px 10px -2px rgba(245, 158, 11, 0.4);
+    box-shadow: 0 8px 18px -4px rgba(245, 158, 11, 0.45);
   }
-  .wt-submit:hover { background: var(--accent-hover); box-shadow: 0 6px 14px -2px rgba(217, 119, 6, 0.45); }
-  .wt-submit:active { transform: translateY(1px); box-shadow: 0 2px 6px -2px rgba(217, 119, 6, 0.4); }
+  .wt-submit:hover { background: var(--accent-hover); box-shadow: 0 10px 22px -4px rgba(217, 119, 6, 0.5); }
+  .wt-submit:active { transform: translateY(1px); box-shadow: 0 4px 10px -2px rgba(217, 119, 6, 0.4); }
   .wt-submit:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
-  .wt-save-state { font-size: 11.5px; color: var(--text-muted); text-align: center; margin-top: 10px; font-family: 'IBM Plex Mono', monospace; min-height: 14px; }
+  .wt-save-state { font-size: 11.5px; color: var(--text-muted); text-align: center; margin-top: 12px; font-family: 'IBM Plex Mono', monospace; min-height: 14px; }
 
-  .wt-ledger-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-  .wt-filter-row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .wt-ledger-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .wt-filter-row { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
   .wt-filter-row input[type=date] { width: auto; min-width: 128px; }
   .wt-filter-row select {
-    background: var(--surface-2); border: 1.5px solid var(--border); color: var(--text);
-    border-radius: var(--r-sm); padding: 10px 12px; font-size: 14px; font-family: 'Prompt', sans-serif;
+    background: var(--surface-2); border: 1.5px solid transparent; color: var(--text);
+    border-radius: var(--r-sm); padding: 11px 13px; font-size: 14px; font-family: 'Prompt', sans-serif;
     outline: none; width: auto; min-width: 132px; cursor: pointer;
     transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
   }
-  .wt-filter-row select:hover { border-color: #CBD5E1; }
+  .wt-filter-row select:hover { border-color: #E2E8F0; }
   .wt-filter-row select:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-ring); }
   .wt-search-input { flex: 1; min-width: 140px; }
   .wt-filter-sep { color: var(--text-faint); font-size: 12px; }
   .wt-csv-btn {
-    background: var(--surface-2); border: 1.5px solid var(--border); color: var(--text-muted);
-    border-radius: var(--r-sm); padding: 8px 16px; font-size: 12.5px; cursor: pointer;
+    background: var(--surface-2); border: none; color: var(--text-muted);
+    border-radius: var(--r-sm); padding: 9px 18px; font-size: 12.5px; cursor: pointer;
     font-family: 'IBM Plex Mono', monospace; font-weight: 500; transition: all 0.2s var(--ease);
   }
-  .wt-csv-btn:hover { color: var(--accent-soft); border-color: var(--accent); background: var(--accent-dim); }
+  .wt-csv-btn:hover { color: var(--accent-soft); background: var(--accent-dim); }
   .wt-csv-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  .wt-table-wrap { overflow-x: auto; max-height: 560px; overflow-y: auto; border-radius: var(--r-md); border: 1px solid var(--border); min-width: 0; -webkit-overflow-scrolling: touch; background: var(--surface); }
+  .wt-table-wrap { overflow-x: auto; max-height: 560px; overflow-y: auto; border-radius: var(--r-md); border: none; min-width: 0; -webkit-overflow-scrolling: touch; background: var(--surface); box-shadow: var(--shadow-xs); }
   table.wt-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   table.wt-table thead th {
-    text-align: left; font-weight: 600; color: var(--text); font-size: 11px; text-transform: uppercase;
-    letter-spacing: 0.04em; padding: 13px 14px; border-bottom: 1px solid var(--border);
+    text-align: left; font-weight: 700; color: var(--text-muted); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.05em; padding: 16px 18px; border-bottom: 1px solid var(--border);
     position: sticky; top: 0; background: var(--table-head); z-index: 1;
   }
-  table.wt-table td { padding: 13px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; color: var(--text-muted); }
+  table.wt-table td { padding: 16px 18px; border-bottom: 1px solid var(--border); vertical-align: middle; color: var(--text-muted); transition: background 0.15s var(--ease); white-space: nowrap; }
   table.wt-table tr:hover td { background: #FFFBEB; }
+  .wt-row-click { cursor: pointer; }
   table.wt-table tr:last-child td { border-bottom: none; }
   .wt-sortable-th { cursor: pointer; user-select: none; white-space: nowrap; transition: color 0.15s var(--ease); }
   .wt-sortable-th:hover { color: var(--accent-soft); }
   .wt-sort-arrow { font-size: 9px; margin-left: 3px; opacity: 0.75; }
-  .wt-tag { display: inline-block; padding: 4px 12px; border-radius: var(--r-pill); font-size: 11.5px; font-weight: 600; white-space: nowrap; }
-  .wt-thumb { width: 36px; height: 36px; object-fit: cover; border-radius: var(--r-sm); cursor: pointer; border: 1px solid var(--border); transition: transform 0.15s var(--ease); }
+  .wt-tag { display: inline-block; padding: 5px 14px; border-radius: var(--r-pill); font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+  .wt-thumb { width: 36px; height: 36px; object-fit: cover; border-radius: var(--r-sm); cursor: pointer; border: none; box-shadow: var(--shadow-xs); transition: transform 0.15s var(--ease); }
   .wt-thumb:hover { transform: scale(1.08); }
   .wt-thumb-wrap { position: relative; width: 36px; height: 36px; }
   .wt-thumb-badge { position: absolute; bottom: -4px; right: -4px; background: var(--accent); color: #fff; font-size: 9px; font-weight: 700; border-radius: 8px; padding: 1px 5px; line-height: 1.3; font-family: 'IBM Plex Mono', monospace; box-shadow: var(--shadow-sm); }
-  .wt-thumb-empty { width: 36px; height: 36px; border-radius: var(--r-sm); border: 1px dashed var(--border); color: var(--text-faint); display: flex; align-items: center; justify-content: center; font-size: 14px; }
-  .wt-del { background: var(--surface-2); border: 1.5px solid var(--border); color: var(--text-muted); border-radius: var(--r-sm); width: 28px; height: 28px; cursor: pointer; font-size: 12px; transition: all 0.2s var(--ease); }
-  .wt-del:hover { color: var(--danger); border-color: var(--danger); background: var(--danger-dim); }
-  .wt-edit-btn { background: var(--surface-2); border: 1.5px solid var(--border); color: var(--text-muted); border-radius: var(--r-sm); padding: 6px 12px; cursor: pointer; font-size: 11.5px; font-family: inherit; font-weight: 500; transition: all 0.2s var(--ease); }
-  .wt-edit-btn:hover { color: var(--accent-soft); border-color: var(--accent); background: var(--accent-dim); }
-  .wt-empty { color: var(--text-faint); font-size: 13.5px; text-align: center; padding: 36px 0; }
+  .wt-thumb-empty { width: 36px; height: 36px; border-radius: var(--r-sm); border: 1.5px dashed #E2E8F0; color: var(--text-faint); display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .wt-del { background: var(--surface-2); border: none; color: var(--text-muted); border-radius: var(--r-sm); width: 30px; height: 30px; cursor: pointer; font-size: 12px; transition: all 0.2s var(--ease); }
+  .wt-del:hover { color: var(--danger); background: var(--danger-dim); }
+  .wt-edit-btn { background: var(--surface-2); border: none; color: var(--text-muted); border-radius: var(--r-sm); padding: 7px 14px; cursor: pointer; font-size: 11.5px; font-family: inherit; font-weight: 600; transition: all 0.2s var(--ease); }
+  .wt-edit-btn:hover { color: var(--accent-soft); background: var(--accent-dim); }
+  .wt-empty { color: var(--text-faint); font-size: 13.5px; text-align: center; padding: 40px 0; }
   .wt-prod-code { color: var(--text-faint); font-size: 11px; }
   .wt-run-no { color: var(--accent-soft); font-weight: 700; white-space: nowrap; font-family: 'IBM Plex Mono', monospace; }
   .wt-rootcause-cell { max-width: 220px; white-space: normal; font-size: 12.5px; line-height: 1.6; color: var(--text-muted); }
   .wt-wrap-cell { max-width: 220px; white-space: normal; font-size: 12.5px; line-height: 1.6; color: var(--text-muted); }
 
-  .wt-stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px; }
+  .wt-stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 24px; }
   @media (max-width: 700px) { .wt-stat-row { grid-template-columns: 1fr; } }
   .wt-stat {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
-    padding: 18px 20px; box-shadow: var(--shadow-md);
+    background: var(--surface); border: none; border-radius: var(--r-md);
+    padding: 20px 22px; box-shadow: var(--shadow-md);
     transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
     position: relative; overflow: hidden;
   }
   .wt-stat::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--accent); }
   .wt-stat:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
   .wt-stat .lbl { font-size: 11.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-family: 'IBM Plex Mono', monospace; font-weight: 500; }
-  .wt-stat .val { font-family: 'Prompt', sans-serif; font-size: 30px; font-weight: 700; margin-top: 6px; color: var(--text); }
+  .wt-stat .val { font-family: 'Prompt', sans-serif; font-size: 30px; font-weight: 700; margin-top: 8px; color: var(--text); }
   .wt-stat .val span { font-size: 14px; color: var(--text-muted); font-family: 'Prompt', sans-serif; font-weight: 500; margin-left: 4px; }
-  .wt-stat .sub { font-size: 11.5px; color: var(--text-faint); margin-top: 4px; }
+  .wt-stat .sub { font-size: 11.5px; color: var(--text-faint); margin-top: 6px; }
 
-  .wt-range-toggle { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
-  .wt-range-btn { background: var(--surface); border: 1.5px solid var(--border); color: var(--text-muted); padding: 8px 16px; border-radius: var(--r-pill); font-size: 12.5px; cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-weight: 500; transition: all 0.2s var(--ease); }
-  .wt-range-btn:hover { border-color: var(--accent); color: var(--accent-soft); }
-  .wt-range-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); box-shadow: 0 3px 8px -2px rgba(245, 158, 11, 0.45); }
+  .wt-range-toggle { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+  .wt-range-btn { background: var(--surface); border: none; color: var(--text-muted); padding: 9px 18px; border-radius: var(--r-pill); font-size: 12.5px; cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-weight: 500; box-shadow: var(--shadow-xs); transition: all 0.2s var(--ease); }
+  .wt-range-btn:hover { color: var(--accent-soft); box-shadow: var(--shadow-sm); }
+  .wt-range-btn.active { background: var(--accent); color: #fff; box-shadow: 0 6px 14px -4px rgba(245, 158, 11, 0.5); }
 
-  .wt-dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 18px; }
+  .wt-dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
   @media (max-width: 900px) { .wt-dash-grid { grid-template-columns: 1fr; } }
 
-  .wt-gauges { display: flex; flex-direction: column; gap: 13px; }
+  .wt-gauges { display: flex; flex-direction: column; gap: 14px; }
   .wt-gauge-row { display: flex; align-items: center; gap: 12px; }
   .wt-gauge-label { width: 150px; font-size: 12.5px; color: var(--text-muted); flex-shrink: 0; }
-  .wt-gauge-track { flex: 1; height: 14px; background: var(--table-head); border: 1px solid var(--border); border-radius: var(--r-pill); overflow: hidden; }
+  .wt-gauge-track { flex: 1; height: 14px; background: var(--table-head); border: none; border-radius: var(--r-pill); overflow: hidden; }
   .wt-gauge-fill { height: 100%; border-radius: var(--r-pill); }
   .wt-gauge-val { width: 90px; text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; flex-shrink: 0; color: var(--text); font-weight: 500; }
 
   .wt-source-table { width: 100%; font-size: 13.5px; border-collapse: collapse; }
-  .wt-source-table th { text-align: left; font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 4px 4px 10px; border-bottom: 1px solid var(--border); }
-  .wt-source-table td { padding: 9px 4px; border-bottom: 1px solid var(--border); color: var(--text-muted); }
+  .wt-source-table th { text-align: left; font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 4px 4px 12px; border-bottom: 1px solid var(--border); }
+  .wt-source-table td { padding: 11px 4px; border-bottom: 1px solid var(--border); color: var(--text-muted); }
   .wt-source-table .name-cell { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 500; }
-  .wt-source-bar-track { background: var(--table-head); border-radius: var(--r-pill); height: 8px; overflow: hidden; border: 1px solid var(--border); }
+  .wt-source-bar-track { background: var(--table-head); border-radius: var(--r-pill); height: 8px; overflow: hidden; }
   .wt-source-bar-fill { height: 100%; background: var(--accent); border-radius: var(--r-pill); }
 
   .wt-trend { display: flex; align-items: flex-end; gap: 5px; height: 160px; padding-top: 10px; }
@@ -274,19 +285,19 @@
   .wt-lb-next { right: 24px; }
   .wt-lb-count { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.55); color: #fff; padding: 5px 14px; border-radius: var(--r-pill); font-size: 12px; font-family: 'IBM Plex Mono', monospace; }
 
-  .wt-settings-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
-  .wt-settings-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .wt-settings-grid { display: grid; grid-template-columns: 1fr; gap: 24px; }
+  .wt-settings-row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
   @media (max-width: 900px) { .wt-settings-row { grid-template-columns: 1fr; } }
   .wt-chip-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; min-height: 20px; }
-  .wt-chip { display: flex; align-items: center; gap: 8px; background: var(--table-head); border: 1px solid var(--border); border-radius: var(--r-pill); padding: 7px 8px 7px 14px; font-size: 12.5px; color: var(--text); transition: border-color 0.2s var(--ease); }
-  .wt-chip:hover { border-color: var(--accent); }
+  .wt-chip { display: flex; align-items: center; gap: 8px; background: var(--table-head); border: none; border-radius: var(--r-pill); padding: 8px 8px 8px 15px; font-size: 12.5px; color: var(--text); transition: box-shadow 0.2s var(--ease); }
+  .wt-chip:hover { box-shadow: var(--shadow-xs); }
   .wt-chip-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
   .wt-chip button { background: transparent; border: none; color: var(--text-muted); cursor: pointer; width: 18px; height: 18px; border-radius: 50%; font-size: 11px; transition: color 0.15s var(--ease); }
   .wt-chip button:hover { color: var(--danger); }
-  .wt-inline-add { display: flex; gap: 10px; margin-top: 14px; }
+  .wt-inline-add { display: flex; gap: 10px; margin-top: 16px; }
   .wt-inline-add input { flex: 1; }
   .wt-inline-add button {
-    background: var(--accent); color: #fff; border: none; border-radius: var(--r-sm); padding: 0 18px;
+    background: var(--accent); color: #fff; border: none; border-radius: var(--r-sm); padding: 0 20px;
     font-weight: 600; cursor: pointer; font-size: 13.5px; font-family: 'Prompt', sans-serif;
     transition: background 0.2s var(--ease), transform 0.1s var(--ease);
   }
@@ -298,6 +309,14 @@
   .wt-cancel-link { background: none; border: none; color: var(--text-muted); text-decoration: underline; cursor: pointer; font-size: 12.5px; margin-top: 8px; font-family: inherit; }
   .wt-cancel-link:hover { color: var(--text); }
   .wt-note { font-size: 12px; color: var(--text-faint); margin: 12px 0 0; line-height: 1.7; }
+
+  /* soft accent-tinted action bar for "X selected" toolbars — distinct from the hero total banner */
+  .wt-select-bar {
+    background: var(--accent-dim); border: none; border-radius: var(--r-sm);
+    padding: 12px 16px; display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 16px; flex-wrap: wrap; gap: 10px;
+  }
+  .wt-select-bar .lbl { font-size: 13px; color: var(--accent-soft); font-weight: 600; }
 
   /* ---------- responsive: PC / iPad (portrait + landscape) / mobile ---------- */
 
@@ -438,6 +457,7 @@
     range: "30d",
     editingProductId: null,
     editingEntryId: null,
+    viewEntryId: null,
     lightboxEntryId: null,
     lightboxIndex: 0,
     pendingPhotos: [],
@@ -770,6 +790,7 @@
       renderPrintModal() +
       renderBulkWithdrawModal() +
       renderDeleteConfirmModal() +
+      renderEntryDetailModal() +
       renderDeleteConfirmProductModal() +
       renderDeleteConfirmProdLogModal();
     updateSaveIndicator();
@@ -1101,8 +1122,8 @@
   function getEntryStatus(entry) {
     var hasRootCause = entry.rootCause && entry.rootCause.trim();
     return hasRootCause
-      ? { label: "เสร็จสมบูรณ์", color: "#4E9A5C" }
-      : { label: "รอ PD Confirm", color: "#C97A12" };
+      ? { label: "เสร็จสมบูรณ์", color: "#047857" }
+      : { label: "รอ PD Confirm", color: "#B45309" };
   }
 
   // Waste-stock status: newly-created entries sit "in stock" at their storage
@@ -1113,8 +1134,8 @@
   function getStockStatusInfo(entry) {
     var key = entry.stockStatus || "withdrawn";
     return key === "in_stock"
-      ? { key: "in_stock", label: "อยู่ในคลัง", color: "#C97A12" }
-      : { key: "withdrawn", label: "เบิกจัดการแล้ว", color: "#4E9A5C" };
+      ? { key: "in_stock", label: "อยู่ในคลัง", color: "#B45309" }
+      : { key: "withdrawn", label: "เบิกจัดการแล้ว", color: "#047857" };
   }
 
   function computeEntryRunNumbers() {
@@ -1130,39 +1151,23 @@
 
   function renderLedgerRowsHtml(list) {
     if (list.length === 0) return '<div class="wt-empty">ไม่พบรายการที่ตรงกับตัวกรอง</div>';
-    var runNumbers = computeEntryRunNumbers();
-    return '<table class="wt-table"><thead><tr><th>เลขที่รายการ</th><th>รูป</th><th>วันที่</th><th>สินค้า</th><th>ประเภท</th><th>จำนวน</th><th>มูลค่า</th><th>ตำแหน่งเก็บ</th><th>สถานะคลัง</th><th>สาเหตุ &amp; แนวทางแก้ไข</th><th>สถานะ</th><th></th></tr></thead><tbody>' +
+    return '<table class="wt-table"><thead><tr><th>วันที่</th><th>สินค้า</th><th>ประเภท</th><th>จำนวน</th><th>สถานะ</th></tr></thead><tbody>' +
       list.map(function (e) {
         var t = findWasteType(e.type);
         var status = getEntryStatus(e);
-        var stock = getStockStatusInfo(e);
         var ePhotos = e.photos || [];
         var thumb = ePhotos.length
-          ? '<div class="wt-thumb-wrap"><img class="wt-thumb" src="' + ePhotos[0] + '" alt="" data-action="openLightbox" data-id="' + e.id + '">' +
+          ? '<div class="wt-thumb-wrap"><img class="wt-thumb" src="' + ePhotos[0] + '" alt="">' +
             (ePhotos.length > 1 ? '<span class="wt-thumb-badge">' + ePhotos.length + "</span>" : "") + "</div>"
           : '<div class="wt-thumb-empty">–</div>';
-        var rootCauseCell = (e.rootCause && e.rootCause.trim())
-          ? '<div class="wt-rootcause-cell">' + esc(e.rootCause) + "</div>"
-          : '<span class="wt-prod-code">–</span>';
-        var stockCell = '<span class="wt-tag" style="background:' + stock.color + '26;color:' + stock.color + '">' + stock.label + "</span>" +
-          (stock.key === "withdrawn" && e.withdrawnAt ? '<div class="wt-prod-code wt-mono" style="margin-top:4px;">' + esc(e.withdrawnAt) + "</div>" : "");
-        return "<tr>" +
-          '<td class="wt-mono wt-run-no">' + esc(runNumbers[e.id] || "-") + "</td>" +
-          "<td>" + thumb + "</td>" +
+        return '<tr class="wt-row-click" data-action="viewEntryDetail" data-id="' + e.id + '">' +
           '<td class="wt-mono">' + esc(e.date) + "</td>" +
-          "<td>" + esc(e.productName) + (e.productCode ? '<div class="wt-prod-code wt-mono">' + esc(e.productCode) + "</div>" : "") + "</td>" +
+          '<td><div style="display:flex;align-items:center;gap:10px;">' + thumb +
+            '<div>' + esc(e.productName) + (e.productCode ? '<div class="wt-prod-code wt-mono">' + esc(e.productCode) + "</div>" : "") + "</div>" +
+          "</div></td>" +
           '<td><span class="wt-tag" style="background:' + t.color + '26;color:' + t.color + '">' + esc(t.label) + "</span></td>" +
           '<td class="wt-mono">' + fmtNum(e.quantity) + " " + esc(e.unit) + "</td>" +
-          '<td class="wt-mono" style="color:var(--money)">' + fmtBaht(e.totalAmount) +
-            (isSaleMethod(e.method) && e.salePrice != null ? '<div class="wt-prod-code wt-mono" style="color:var(--good);">ขาย' + (e.saleQuantity != null ? " " + fmtNum(e.saleQuantity) + " " + esc(e.saleUnit || e.unit) : "") + " ได้ " + fmtBaht(e.salePrice) + " บ.</div>" : "") +
-          "</td>" +
-          "<td>" + esc(e.location || "–") + "</td>" +
-          "<td>" + stockCell + "</td>" +
-          "<td>" + rootCauseCell + "</td>" +
           '<td><span class="wt-tag" style="background:' + status.color + '26;color:' + status.color + '">' + status.label + "</span></td>" +
-          '<td style="display:flex;gap:6px;flex-wrap:wrap;">' +
-          '<button class="wt-edit-btn" data-action="editEntry" data-id="' + e.id + '">แก้ไข</button>' +
-          '<button class="wt-del" data-action="deleteEntry" data-id="' + e.id + '" title="ลบ">✕</button></td>' +
           "</tr>";
       }).join("") +
       "</tbody></table>";
@@ -1174,6 +1179,76 @@
     if (wrap) wrap.innerHTML = renderLedgerRowsHtml(filtered);
     var countEl = document.getElementById("ledgerCountText");
     if (countEl) countEl.textContent = "พบ " + filtered.length + " จากทั้งหมด " + state.entries.length + " รายการ";
+  }
+
+  // ---- entry detail modal: tap a condensed list row to see every field ----
+  function renderEntryDetailModal() {
+    if (!state.viewEntryId) return "";
+    var entry = state.entries.find(function (x) { return x.id === state.viewEntryId; });
+    if (!entry) return "";
+    var t = findWasteType(entry.type);
+    var status = getEntryStatus(entry);
+    var stock = getStockStatusInfo(entry);
+    var runNumbers = computeEntryRunNumbers();
+    var photos = entry.photos || [];
+    var photosHtml = photos.length
+      ? '<div class="wt-photo-preview-list" style="justify-content:flex-start;">' +
+          photos.map(function (src, i) {
+            return '<img class="wt-thumb" style="width:64px;height:64px;" src="' + src + '" alt="" data-action="openLightbox" data-id="' + entry.id + '" data-photo-index="' + i + '">';
+          }).join("") +
+        "</div>"
+      : '<div class="wt-hint">ไม่มีรูปภาพแนบ</div>';
+
+    function row(label, valueHtml) {
+      return '<div style="display:flex;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid var(--border);">' +
+        '<div style="color:var(--text-muted);font-size:13px;flex-shrink:0;">' + esc(label) + "</div>" +
+        '<div style="text-align:right;min-width:0;">' + valueHtml + "</div>" +
+      "</div>";
+    }
+
+    var saleInfo = (isSaleMethod(entry.method) && entry.salePrice != null)
+      ? row("จำนวนที่ขาย", (entry.saleQuantity != null ? (fmtNum(entry.saleQuantity) + " " + esc(entry.saleUnit || entry.unit)) : "–")) +
+        row("จำนวนเงินที่ขายได้จริง", '<span style="color:var(--good);font-weight:600;">' + fmtBaht(entry.salePrice) + " บาท</span>")
+      : "";
+
+    return (
+      '<div class="wt-lightbox" data-action="closeEntryDetail" style="align-items:flex-start;padding-top:40px;overflow-y:auto;">' +
+        '<div class="wt-card" style="width:480px;max-width:92vw;text-align:left;max-height:88vh;overflow-y:auto;cursor:auto;">' +
+          '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px;">' +
+            "<h3 style=\"margin:0;border:none;padding:0;\">" + esc(entry.productName) + "</h3>" +
+            '<button type="button" class="wt-del" data-action="closeEntryDetail" title="ปิด">✕</button>' +
+          "</div>" +
+          (entry.productCode ? '<div class="wt-prod-code wt-mono" style="margin-bottom:14px;">' + esc(entry.productCode) + "</div>" : '<div style="margin-bottom:14px;"></div>') +
+
+          row("เลขที่รายการ", '<span class="wt-mono">' + esc(runNumbers[entry.id] || "-") + "</span>") +
+          row("วันที่บันทึก", '<span class="wt-mono">' + esc(entry.date) + "</span>") +
+          row("ประเภทของเสีย", '<span class="wt-tag" style="background:' + t.color + '26;color:' + t.color + '">' + esc(t.label) + "</span>") +
+          row("จำนวน", '<span class="wt-mono">' + fmtNum(entry.quantity) + " " + esc(entry.unit) + "</span>") +
+          row("มูลค่าของเสีย", '<span class="wt-mono" style="color:var(--money);font-weight:600;">' + fmtBaht(entry.totalAmount) + " บาท</span>") +
+          saleInfo +
+          row("ไลน์ผลิต/แผนก", esc(entry.line || "–")) +
+          row("ตำแหน่งที่เก็บ", esc(entry.location || "–")) +
+          row("สถานะคลัง", '<span class="wt-tag" style="background:' + stock.color + '26;color:' + stock.color + '">' + stock.label + "</span>") +
+          (stock.key === "withdrawn" ? row("วิธีการจัดการ", esc(entry.method || "–")) : "") +
+          (stock.key === "withdrawn" && entry.withdrawnAt ? row("วันที่เบิก", '<span class="wt-mono">' + esc(entry.withdrawnAt) + "</span>") : "") +
+          (stock.key === "withdrawn" && entry.docNumber ? row("เลขที่เอกสาร", '<span class="wt-mono">' + esc(entry.docNumber) + "</span>") : "") +
+          (entry.withdrawnNote ? row("หมายเหตุการเบิก", esc(entry.withdrawnNote)) : "") +
+          row("สถานะ", '<span class="wt-tag" style="background:' + status.color + '26;color:' + status.color + '">' + status.label + "</span>") +
+          row("สาเหตุ & แนวทางแก้ไข", entry.rootCause ? esc(entry.rootCause) : '<span class="wt-prod-code">–</span>') +
+          row("หมายเหตุ", entry.note ? esc(entry.note) : '<span class="wt-prod-code">–</span>') +
+
+          '<div style="margin-top:14px;">' +
+            '<div style="color:var(--text-muted);font-size:13px;margin-bottom:8px;">รูปภาพของเสีย</div>' +
+            photosHtml +
+          "</div>" +
+
+          '<div style="display:flex;gap:10px;margin-top:20px;">' +
+            '<button type="button" class="wt-edit-btn" style="flex:1;background:var(--accent);color:#fff;" data-action="editEntry" data-id="' + entry.id + '">แก้ไขรายการ</button>' +
+            '<button type="button" class="wt-edit-btn" style="flex:1;color:var(--danger);" data-action="deleteEntry" data-id="' + entry.id + '">ลบรายการ</button>' +
+          "</div>" +
+        "</div>" +
+      "</div>"
+    );
   }
 
   function renderPhotoPreviewsHtml() {
@@ -1208,8 +1283,8 @@
   function getProdLogStatus(p) {
     var hasResult = p.result && p.result.trim();
     return hasResult
-      ? { label: "แก้ไขเสร็จสิ้น", color: "#4E9A5C" }
-      : { label: "รอสรุปผล", color: "#C97A12" };
+      ? { label: "แก้ไขเสร็จสิ้น", color: "#047857" }
+      : { label: "รอสรุปผล", color: "#B45309" };
   }
 
   function computeProdLogRunNumbers() {
@@ -1428,7 +1503,7 @@
         "</div>" +
 
         '<div class="wt-card">' +
-          '<div class="wt-ledger-head"><h3 style="margin:0;border:none;padding:0;">รายการล่าสุด (' + state.entries.length + ")</h3>" +
+          '<div class="wt-ledger-head"><h3 style="margin-bottom:0;">รายการล่าสุด (' + state.entries.length + ")</h3>" +
             '<button class="wt-csv-btn" data-action="exportCsv"' + (filteredEntries.length ? "" : " disabled") + ">⤓ ดาวน์โหลด CSV</button>" +
           "</div>" +
           '<div class="wt-filter-row">' +
@@ -1664,7 +1739,7 @@
         var momPct = ((thisMonthEntry.value - prevMonthEntry.value) / prevMonthEntry.value) * 100;
         var momUp = momPct > 0.05;
         var momDown = momPct < -0.05;
-        var momColor = momUp ? "var(--danger)" : momDown ? "#4E9A5C" : "var(--text-muted)";
+        var momColor = momUp ? "var(--danger)" : momDown ? "#047857" : "var(--text-muted)";
         var momArrow = momUp ? "▲" : momDown ? "▼" : "—";
         momChangeHtml = '<span class="wt-mono" style="color:' + momColor + ';font-weight:600;">' + momArrow + " " + Math.abs(momPct).toFixed(1) + "%</span>";
       }
@@ -1762,7 +1837,7 @@
             } else {
               var pct = ((x.value - prev) / prev) * 100;
               var up = pct > 0.05, down = pct < -0.05;
-              var color = up ? "var(--danger)" : down ? "#4E9A5C" : "var(--text-muted)";
+              var color = up ? "var(--danger)" : down ? "#047857" : "var(--text-muted)";
               var arrow = up ? "▲" : down ? "▼" : "—";
               change = '<span class="wt-mono" style="color:' + color + ';">' + arrow + " " + Math.abs(pct).toFixed(1) + "%</span>";
             }
@@ -1890,7 +1965,7 @@
               "</div>" +
               (g.entries[0].withdrawnNote ? '<div class="wt-hint" style="margin:2px 0 0;">หมายเหตุ: ' + esc(g.entries[0].withdrawnNote) + "</div>" : "") +
             "</div>" +
-            '<button type="button" class="wt-edit-btn" style="border-color:var(--accent);color:var(--accent-soft);" data-action="reprintDocument" data-key="' + esc(g.key) + '">🖨 พิมพ์อีกครั้ง</button>' +
+            '<button type="button" class="wt-edit-btn" style="background:var(--accent);color:#fff;" data-action="reprintDocument" data-key="' + esc(g.key) + '">🖨 พิมพ์อีกครั้ง</button>' +
           "</div>" +
           '<div class="wt-table-wrap" style="margin-top:10px;"><table class="wt-table"><thead><tr>' +
             "<th>เลขที่รายการ</th><th>สินค้า</th><th>จำนวน</th><th>มูลค่าของเสีย</th><th>วิธีการจัดการ</th><th>จำนวนที่ขาย</th><th>ขายได้จริง</th>" +
@@ -2091,11 +2166,11 @@
           "</div>" +
           '<div class="wt-hint" style="margin:0 0 8px;">พบ ' + stockList.length + " จากทั้งหมด " + inStockEntries.length + " รายการคงคลัง · ติ๊กเลือกรายการที่ต้องการแล้วกดเบิกพร้อมกันได้</div>" +
           (selectedStockEntries.length ?
-            '<div class="wt-total-box" style="flex-wrap:wrap;gap:10px;">' +
+            '<div class="wt-select-bar">' +
               '<div class="lbl">เลือกไว้ ' + selectedStockEntries.length + ' รายการ · รวม ' + fmtBaht(selectedStockTotal) + ' บาท</div>' +
               '<div style="display:flex;gap:10px;align-items:center;">' +
                 '<button type="button" class="wt-link" data-action="clearStockSelection">ล้างการเลือก</button>' +
-                '<button type="button" class="wt-edit-btn" style="border-color:var(--accent);color:var(--accent-soft);" data-action="openBulkWithdraw">📤 เบิกรายการที่เลือก (' + selectedStockEntries.length + ')</button>' +
+                '<button type="button" class="wt-edit-btn" style="background:var(--accent);color:#fff;" data-action="openBulkWithdraw">📤 เบิกรายการที่เลือก (' + selectedStockEntries.length + ')</button>' +
               "</div>" +
             "</div>" : "") +
           '<div class="wt-table-wrap" id="stockTableWrap">' + renderStockRowsHtml(stockList) + "</div>" +
@@ -2112,7 +2187,7 @@
           (byMethod.length === 0 ? '<div class="wt-empty">ยังไม่มีการเบิกในช่วงที่เลือก</div>' :
             '<div class="wt-gauges">' + byMethod.map(function (x) {
               return '<div class="wt-gauge-row"><div class="wt-gauge-label">' + esc(x.method) + " (" + x.count + ")</div>" +
-                '<div class="wt-gauge-track"><div class="wt-gauge-fill" style="width:' + (x.value / maxMethod * 100) + '%;background:#4E9A5C;"></div></div>' +
+                '<div class="wt-gauge-track"><div class="wt-gauge-fill" style="width:' + (x.value / maxMethod * 100) + '%;background:#059669;"></div></div>' +
                 '<div class="wt-gauge-val wt-mono">' + fmtBaht(x.value) + " บ.</div></div>";
             }).join("") + "</div>" +
             '<div class="wt-hint" style="margin-top:10px;">รวมที่เบิกในช่วงนี้: ' + fmtBaht(withdrawnRangeTotal) + " บาท (" + withdrawnInRange.length + " รายการ)</div>") +
@@ -2780,7 +2855,10 @@
         state.rangeStart = b.start === "0000-00-00" ? todayStr() : b.start;
         state.rangeEnd = b.end;
         render(); break;
+      case "viewEntryDetail": state.viewEntryId = el.getAttribute("data-id"); render(); break;
+      case "closeEntryDetail": if (e.target === el) { state.viewEntryId = null; render(); } break;
       case "deleteEntry":
+        state.viewEntryId = null;
         state.confirmDeleteEntryId = el.getAttribute("data-id");
         render(); break;
       case "confirmDeleteEntry":
@@ -2797,6 +2875,7 @@
       case "editEntry":
         var editTarget = state.entries.find(function (x) { return x.id === el.getAttribute("data-id"); });
         if (editTarget) {
+          state.viewEntryId = null;
           state.editingEntryId = editTarget.id;
           state.pendingPhotos = editTarget.photos ? editTarget.photos.slice() : [];
           showFormError("");
@@ -2809,7 +2888,7 @@
         state.editingEntryId = null;
         state.pendingPhotos = [];
         render(); break;
-      case "openLightbox": state.lightboxEntryId = el.getAttribute("data-id"); state.lightboxIndex = 0; render(); break;
+      case "openLightbox": state.lightboxEntryId = el.getAttribute("data-id"); state.lightboxIndex = parseInt(el.getAttribute("data-photo-index"), 10) || 0; render(); break;
       case "closeLightbox": if (e.target === el) { state.lightboxEntryId = null; render(); } break;
       case "lightboxPrev": case "lightboxNext":
         var lbEntry = state.entries.find(function (x) { return x.id === state.lightboxEntryId; });
