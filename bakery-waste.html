@@ -1467,8 +1467,11 @@
 
             '<div class="wt-row3">' +
               '<div class="wt-field"><label>จำนวน</label><input type="number" step="0.01" min="0" placeholder="0" id="quantityField" data-live-total value="' + esc(initialQty) + '"></div>' +
-              '<div class="wt-field"><label>หน่วย</label><input id="unitField" disabled value="' + esc(initialUnit) + '"></div>' +
+              '<div class="wt-field"><label>หน่วย</label><select id="unitField">' + buildUnitSelectOptions(initialUnit) + "</select></div>" +
               '<div class="wt-field"><label>ราคา/หน่วย (บาท)</label><input type="number" step="0.01" min="0" placeholder="0.00" id="unitPriceField" data-live-total value="' + esc(initialPrice) + '"></div>' +
+            "</div>" +
+            '<div class="wt-hint" id="unitMismatchHint" style="margin-top:-8px;margin-bottom:14px;' + (matchedProduct && initialUnit && initialUnit !== matchedProduct.unit ? "" : "display:none;") + '">' +
+              (matchedProduct ? "หน่วยไม่ตรงกับหน่วยที่ตั้งค่าไว้ของสินค้านี้ (" + esc(matchedProduct.unit) + ") — กรุณาระบุราคาเอง" : "") +
             "</div>" +
 
             '<div class="wt-total-box"><span class="lbl">มูลค่าของเสียรวม</span><span class="val" id="totalAmountDisplay">' + fmtBaht(initialTotal) + " บาท</span></div>" +
@@ -1592,9 +1595,10 @@
 
             '<div class="wt-row3">' +
               '<div class="wt-field"><label>จำนวน</label><input type="number" step="0.01" min="0" placeholder="0" id="quantityField" data-live-total value=""></div>' +
-              '<div class="wt-field"><label>หน่วย</label><input id="unitField" disabled value=""></div>' +
+              '<div class="wt-field"><label>หน่วย</label><select id="unitField">' + buildUnitSelectOptions("") + "</select></div>" +
               '<div class="wt-field"><label>ราคา/หน่วย (บาท)</label><input type="number" step="0.01" min="0" placeholder="0.00" id="unitPriceField" data-live-total value=""></div>' +
             "</div>" +
+            '<div class="wt-hint" id="unitMismatchHint" style="margin-top:-8px;margin-bottom:14px;display:none;"></div>' +
 
             '<div class="wt-total-box"><span class="lbl">มูลค่ารับเข้ารวม</span><span class="val" id="totalAmountDisplay">' + fmtBaht(0) + " บาท</span></div>" +
 
@@ -1625,6 +1629,7 @@
     var productId = document.getElementById("productField").value;
     var product = state.settings.products.find(function (p) { return p.id === productId; });
     var quantity = parseFloat(document.getElementById("quantityField").value) || 0;
+    var unit = document.getElementById("unitField").value;
     var unitPrice = parseFloat(document.getElementById("unitPriceField").value) || 0;
     var location = document.getElementById("locationField").value;
     var note = document.getElementById("noteField").value.trim();
@@ -1633,13 +1638,14 @@
     if (!date) return showFormError("กรุณาระบุวันที่");
     if (!product) return showFormError("กรุณาเลือกสินค้า");
     if (!quantity || quantity <= 0) return showFormError("กรุณาระบุจำนวนมากกว่า 0");
+    if (!unit) return showFormError("กรุณาเลือกหน่วย");
     if (unitPrice < 0) return showFormError("ราคาต้องไม่ติดลบ");
     if (!location) return showFormError("กรุณาเลือกตำแหน่งที่เก็บของเสีย");
 
     var entry = {
       id: uid(),
       date: date, productId: product.id, productName: product.name, productCode: product.code,
-      type: OPENING_TYPE_ID, quantity: quantity, unit: product.unit, unitPrice: unitPrice,
+      type: OPENING_TYPE_ID, quantity: quantity, unit: unit, unitPrice: unitPrice,
       totalAmount: quantity * unitPrice, line: "", method: OPENING_METHOD_LABEL, note: note, rootCause: "",
       salePrice: null, saleQuantity: null, saleUnit: null,
       location: location,
@@ -2382,6 +2388,53 @@
   // need to change.
   function productComboLabel(p) { return p.name + (p.code ? " (" + p.code + ")" : ""); }
 
+  // Builds <option> list for the entry/receive forms' "หน่วย" select from the
+  // globally configured unit list, always including the currently selected
+  // unit even if it isn't (or is no longer) in that list.
+  function buildUnitSelectOptions(selectedUnit) {
+    var list = state.settings.units || [];
+    var options = list.map(function (u) {
+      return '<option value="' + esc(u) + '"' + (u === selectedUnit ? " selected" : "") + ">" + esc(u) + "</option>";
+    }).join("");
+    if (selectedUnit && list.indexOf(selectedUnit) === -1) {
+      options = '<option value="' + esc(selectedUnit) + '" selected>' + esc(selectedUnit) + "</option>" + options;
+    }
+    if (!selectedUnit) {
+      options = '<option value="">-- เลือกหน่วย --</option>' + options;
+    }
+    return options;
+  }
+
+  // Called whenever the "หน่วย" select changes (either from picking a product,
+  // or the user manually switching units). Price only auto-fills/shows when
+  // the chosen unit matches the product's configured unit in settings — a
+  // mismatched unit means the configured price doesn't apply, so the field is
+  // cleared and left for the user to fill in themselves.
+  function refreshUnitPriceState() {
+    var unitField = document.getElementById("unitField");
+    var priceField = document.getElementById("unitPriceField");
+    var hintEl = document.getElementById("unitMismatchHint");
+    if (!unitField || !priceField) return;
+    var productId = document.getElementById("productField") ? document.getElementById("productField").value : "";
+    var product = state.settings.products.find(function (p) { return p.id === productId; });
+    var mismatched = !!(product && unitField.value && unitField.value !== product.unit);
+    if (product && !mismatched) {
+      priceField.value = product.price;
+    } else if (mismatched) {
+      priceField.value = "";
+    }
+    if (hintEl) {
+      if (mismatched) {
+        hintEl.style.display = "";
+        hintEl.textContent = "หน่วยไม่ตรงกับหน่วยที่ตั้งค่าไว้ของสินค้านี้ (" + product.unit + ") — กรุณาระบุราคาเอง";
+      } else {
+        hintEl.style.display = "none";
+        hintEl.textContent = "";
+      }
+    }
+    updateTotalDisplay();
+  }
+
   function matchProducts(query) {
     var q = (query || "").trim().toLowerCase();
     var list = state.settings.products;
@@ -2417,9 +2470,9 @@
     var unitField = document.getElementById("unitField");
     var priceField = document.getElementById("unitPriceField");
     if (!unitField || !priceField) return;
-    if (product) { unitField.value = product.unit; priceField.value = product.price; }
-    else { unitField.value = ""; priceField.value = ""; }
-    updateTotalDisplay();
+    if (product) { unitField.innerHTML = buildUnitSelectOptions(product.unit); }
+    else { unitField.innerHTML = buildUnitSelectOptions(""); priceField.value = ""; }
+    refreshUnitPriceState();
   }
 
   function selectProductById(id) {
@@ -2469,6 +2522,7 @@
     var productId = document.getElementById("productField").value;
     var product = state.settings.products.find(function (p) { return p.id === productId; });
     var quantity = parseFloat(document.getElementById("quantityField").value) || 0;
+    var unit = document.getElementById("unitField").value;
     var unitPrice = parseFloat(document.getElementById("unitPriceField").value) || 0;
     var line = document.getElementById("lineField").value;
     var location = document.getElementById("locationField").value;
@@ -2479,6 +2533,7 @@
     if (!date) return showFormError("กรุณาระบุวันที่");
     if (!product) return showFormError("กรุณาเลือกสินค้า");
     if (!quantity || quantity <= 0) return showFormError("กรุณาระบุจำนวนของเสียมากกว่า 0");
+    if (!unit) return showFormError("กรุณาเลือกหน่วย");
     if (unitPrice < 0) return showFormError("ราคาต้องไม่ติดลบ");
     if (!location) return showFormError("กรุณาเลือกตำแหน่งที่เก็บของเสีย");
 
@@ -2491,7 +2546,7 @@
     var entry = {
       id: entryId,
       date: date, productId: product.id, productName: product.name, productCode: product.code,
-      type: type, quantity: quantity, unit: product.unit, unitPrice: unitPrice,
+      type: type, quantity: quantity, unit: unit, unitPrice: unitPrice,
       totalAmount: quantity * unitPrice, line: line, note: note, rootCause: rootCause,
       // The handling method (and sale price, when applicable) are chosen at
       // withdrawal time on the stock tab now — keep whatever was already
@@ -3054,6 +3109,7 @@
     else if (e.target.id === "stockDateFromField") { state.stockDateFrom = e.target.value; render(); }
     else if (e.target.id === "stockDateToField") { state.stockDateTo = e.target.value; render(); }
     else if (e.target.id === "bulkWithdrawMethodField") updateBulkWithdrawSalePriceVisibility();
+    else if (e.target.id === "unitField") refreshUnitPriceState();
     else if (e.target.id === "printStartDate") {
       var docField = document.getElementById("printDocNumber");
       if (docField) docField.value = buildDocNumber(e.target.value);
