@@ -123,6 +123,31 @@
 <script>
 const POLICY_KEY_PREFIX = 'policy:';
 const STORAGE_KEY_POLICIES_LEGACY = 'policies';
+const ASSET_KEY_PREFIX = 'asset:';
+const STORAGE_KEY_ASSETS_LEGACY = 'assets';
+
+// โหลดรายการโรงงาน/รถยนต์ทั้งหมด: รองรับทั้งโครงสร้างใหม่ (เอกสารแยกคีย์ asset:<id>,
+// ใช้ตั้งแต่ insurance.html เวอร์ชันที่รองรับไฟล์แนบ) และคีย์เดิม 'assets' (เผื่อยังไม่ migrate)
+async function loadAllAssets(){
+  let keys = [];
+  try{
+    const listResult = await window.storage.list(ASSET_KEY_PREFIX);
+    keys = (listResult && listResult.keys) || [];
+  }catch(e){ keys = []; }
+
+  if(keys.length > 0){
+    const items = await Promise.all(keys.map(async k => {
+      try{ const r = await window.storage.get(k); return JSON.parse(r.value); }
+      catch(e){ return null; }
+    }));
+    return items.filter(Boolean);
+  }
+
+  try{
+    const legacy = await window.storage.get(STORAGE_KEY_ASSETS_LEGACY);
+    return legacy ? JSON.parse(legacy.value) : [];
+  }catch(e){ return []; }
+}
 
 function policyStatus(p, todayStr){
   if(!p || !p.endDate) return 'none';
@@ -173,7 +198,7 @@ function daysLabel(p, todayStr){
 
 async function loadSummary(){
   let assets = [], policies = [], items = [];
-  try{ const a = await window.storage.get('assets'); assets = a ? JSON.parse(a.value) : []; }catch(e){}
+  try{ assets = await loadAllAssets(); }catch(e){ assets = []; }
   try{ policies = await loadAllPolicies(); }catch(e){ policies = []; }
   try{ const eq = await window.storage.get('equipment'); items = eq ? JSON.parse(eq.value) : []; }catch(e){}
 

@@ -37,8 +37,9 @@
 <script src="firebase-storage.js"></script>
 
 <script>
-const STORAGE_KEY_ASSETS = 'assets';
+const STORAGE_KEY_ASSETS = 'assets'; // คีย์เดิม (array เดียวรวมทุกรายการ) ใช้สำหรับ migrate ครั้งแรกเท่านั้น
 const STORAGE_KEY_POLICIES_LEGACY = 'policies'; // คีย์เดิม (array เดียวรวมทุกกรมธรรม์) ใช้สำหรับ migrate ครั้งแรกเท่านั้น
+const ASSET_KEY_PREFIX = 'asset:';
 const POLICY_KEY_PREFIX = 'policy:';
 
 const KINDS = {
@@ -51,9 +52,9 @@ let assets = [];
 let policies = [];
 let view = { name: 'dashboard', params: { kind: KINDS[new URLSearchParams(location.search).get('kind')] ? new URLSearchParams(location.search).get('kind') : 'factory' } };
 
-// สถานะไฟล์แนบของฟอร์มกรมธรรม์ที่กำลังเปิดอยู่ (รีเซ็ตทุกครั้งที่เข้าฟอร์ม)
+// สถานะไฟล์แนบของฟอร์มที่กำลังเปิดอยู่ (ใช้ร่วมกันทั้งฟอร์มโรงงาน/รถยนต์ และฟอร์มกรมธรรม์ รีเซ็ตทุกครั้งที่เข้าฟอร์ม)
 // kept = ไฟล์เดิมที่เก็บเป็น base64 ไว้แล้ว (มี dataUrl), newFiles = ไฟล์ที่เพิ่งเลือกแต่ยังไม่แปลง (เป็น File object)
-let policyFileState = { kept: [], newFiles: [] };
+let fileState = { kept: [], newFiles: [] };
 
 const MAX_POLICY_DOC_BYTES = 900000; // เผื่อพื้นที่ไว้จากลิมิต ~1,048,487 ไบต์ต่อเอกสารของ Firestore
 
@@ -86,7 +87,7 @@ function fmtFileSize(bytes){
 const uid = () => Math.random().toString(36).slice(2,10);
 const todayStr = () => new Date().toISOString().slice(0,10);
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('th-TH', {year:'numeric', month:'short', day:'numeric'}) : '-';
-const fmtMoney = (n) => n ? Number(n).toLocaleString('th-TH') + ' บาท' : '-';
+const fmtMoney = (n) => (n || n === 0) ? Number(n).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' บาท' : '-';
 
 function policyStatus(p){
   if(!p || !p.endDate) return 'none';
@@ -128,16 +129,53 @@ function statusPill(status){
 }
 
 async function loadData(){
-  try{
-    const a = await window.storage.get(STORAGE_KEY_ASSETS);
-    assets = a ? JSON.parse(a.value) : [];
-  }catch(e){ assets = []; }
+  assets = await loadAssets();
   policies = await loadPolicies();
   render();
 }
-async function saveAssets(){
-  try{ await window.storage.set(STORAGE_KEY_ASSETS, JSON.stringify(assets), false); }
-  catch(e){ console.error('save assets failed', e); }
+
+function assetDocKey(id){ return ASSET_KEY_PREFIX + id; }
+
+async function loadAssets(){
+  // 1) โครงสร้างใหม่: แต่ละรายการ (โรงงาน/รถยนต์) เก็บเป็นคนละเอกสาร (คีย์ asset:<id>)
+  //    ทำแบบนี้เพื่อรองรับไฟล์แนบต่อรายการโดยไม่ให้เอกสารรวมโตเกินลิมิตของ Firestore
+  let keys = [];
+  try{
+    const listResult = await window.storage.list(ASSET_KEY_PREFIX);
+    keys = (listResult && listResult.keys) || [];
+  }catch(e){ keys = []; }
+
+  if(keys.length > 0){
+    const items = await Promise.all(keys.map(async k => {
+      try{
+        const r = await window.storage.get(k);
+        return JSON.parse(r.value);
+      }catch(e){ return null; }
+    }));
+    return items.filter(Boolean);
+  }
+
+  // 2) ไม่มีข้อมูลแบบใหม่ -> ลอง migrate จากของเดิม (คีย์ 'assets' เก็บเป็น array เดียวทั้งหมด)
+  try{
+    const legacy = await window.storage.get(STORAGE_KEY_ASSETS);
+    const legacyAssets = legacy ? JSON.parse(legacy.value) : [];
+    if(legacyAssets.length){
+      for(const a of legacyAssets){
+        await window.storage.set(assetDocKey(a.id), JSON.stringify(a), false);
+      }
+      try{ await window.storage.delete(STORAGE_KEY_ASSETS); }catch(e){ /* ไม่เป็นไรถ้าลบไม่ได้ */ }
+    }
+    return legacyAssets;
+  }catch(e){
+    return [];
+  }
+}
+async function saveAsset(a){
+  await window.storage.set(assetDocKey(a.id), JSON.stringify(a), false);
+}
+async function deleteAssetDoc(id){
+  try{ await window.storage.delete(assetDocKey(id)); }
+  catch(e){ console.error('ลบรายการไม่สำเร็จ', id, e); }
 }
 
 function policyDocKey(id){ return POLICY_KEY_PREFIX + id; }
@@ -338,6 +376,7 @@ function assetFormHtml(assetId){
   const kind = currentKind();
   const assetType = assetTypeForKind(kind);
   const editing = assets.find(a => a.id === assetId);
+  fileState = { kept: (editing?.docFiles || []).slice(), newFiles: [] };
 
   const fields = assetType === 'vehicle' ? `
         <div class="field">
@@ -383,6 +422,11 @@ function assetFormHtml(assetId){
         <div class="field full">
           <label>เอกสารอ้างอิง (ชื่อไฟล์ / เลขที่เอกสาร)</label>
           <input type="text" name="docRef" placeholder="เช่น สำเนาทะเบียน.pdf" value="${escapeAttr(editing?.docRef||'')}">
+          <div class="file-drop" style="margin-top:8px;">
+            <input type="file" id="docFilesInput" multiple>
+            <span class="file-drop-hint">แนบไฟล์เอกสารอ้างอิง (เลือกได้ครั้งละหลายไฟล์)</span>
+          </div>
+          <div class="file-list" id="fileList">${fileListHtml()}</div>
         </div>
       </div>
 
@@ -452,6 +496,10 @@ function assetDetailHtml(assetId){
     </div>
 
     <div class="kv">${kvRows}</div>
+    ${(a.docFiles && a.docFiles.length) ? `
+    <div class="pi-files" style="margin:-6px 0 12px;">
+      ${a.docFiles.map(f => `<a href="${escapeAttr(f.dataUrl)}" download="${escapeAttr(f.name)}" class="pi-file-link">📎 ${escapeHtml(f.name)}</a>`).join('')}
+    </div>` : ''}
     ${a.docRef ? `<p style="font-size:13px;color:var(--ink-soft);margin:-6px 0 20px;">เอกสารอ้างอิง: ${escapeHtml(a.docRef)}</p>` : ''}
 
     <div class="section-title">ประวัติกรมธรรม์ประกัน</div>
@@ -468,7 +516,7 @@ function policyFormHtml(assetId, policyId){
   const originKind = (view.params && view.params.kind) || assetType; // แท็บที่กดเข้ามา (ใช้ตอนย้อนกลับ)
   // ถือว่าเป็น พ.ร.บ. ถ้าเข้ามาจากแท็บ พ.ร.บ. โดยตรง หรือกำลังแก้ไขกรมธรรม์ที่เป็น พ.ร.บ. อยู่แล้ว
   const isCompulsory = originKind === 'compulsory' || editing?.insClass === 'พ.ร.บ.';
-  policyFileState = { kept: (editing?.docFiles || []).slice(), newFiles: [] };
+  fileState = { kept: (editing?.docFiles || []).slice(), newFiles: [] };
 
   return `
   <div class="back-row"><button class="btn-ghost" data-nav="assetDetail" data-asset="${assetId}" data-kind="${originKind}">← กลับหน้ารายการ</button></div>
@@ -505,11 +553,11 @@ function policyFormHtml(assetId, policyId){
         `) : ''}
         <div class="field">
           <label>เบี้ยประกัน (บาท)</label>
-          <input type="number" name="premium" placeholder="0" value="${escapeAttr(editing?.premium||'')}">
+          <input type="number" name="premium" step="0.01" placeholder="0" value="${escapeAttr(editing?.premium||'')}">
         </div>
         <div class="field">
           <label>ทุนประกันภัย (บาท)</label>
-          <input type="number" name="coverAmount" placeholder="0" value="${escapeAttr(editing?.coverAmount||'')}">
+          <input type="number" name="coverAmount" step="0.01" placeholder="0" value="${escapeAttr(editing?.coverAmount||'')}">
         </div>
         <div class="field">
           <label>วันเริ่มคุ้มครอง</label>
@@ -541,20 +589,20 @@ function policyFormHtml(assetId, policyId){
 
 // ---------- ไฟล์แนบ (กรมธรรม์) ----------
 function fileListHtml(){
-  const keptChips = policyFileState.kept.map((f,i) => `
+  const keptChips = fileState.kept.map((f,i) => `
     <div class="file-chip">
       <a href="${escapeAttr(f.dataUrl)}" download="${escapeAttr(f.name)}">${escapeHtml(f.name)}</a>
       <span class="file-size">${fmtFileSize(f.size)}</span>
       <button type="button" class="file-remove" data-remove-kind="kept" data-remove-idx="${i}" title="ลบไฟล์นี้">×</button>
     </div>`).join('');
-  const newChips = policyFileState.newFiles.map((f,i) => `
+  const newChips = fileState.newFiles.map((f,i) => `
     <div class="file-chip file-chip-pending">
       <span>${escapeHtml(f.name)}</span>
       <span class="file-size">${fmtFileSize(f.size)} · ยังไม่บันทึก</span>
       <button type="button" class="file-remove" data-remove-kind="new" data-remove-idx="${i}" title="เอาออก">×</button>
     </div>`).join('');
   const chips = keptChips + newChips;
-  const totalBytes = policyFileState.kept.reduce((s,f)=>s+(f.size||0),0) + policyFileState.newFiles.reduce((s,f)=>s+(f.size||0),0);
+  const totalBytes = fileState.kept.reduce((s,f)=>s+(f.size||0),0) + fileState.newFiles.reduce((s,f)=>s+(f.size||0),0);
   const sizeNote = `<p class="file-size-note">รวมขนาดไฟล์ประมาณ ${fmtFileSize(totalBytes)} (แนะนำไม่เกิน ~700 KB ต่อกรมธรรม์)</p>`;
   return (chips || '<p class="file-empty">ยังไม่มีไฟล์แนบ</p>') + sizeNote;
 }
@@ -569,8 +617,8 @@ function attachFileListHandlers(){
     btn.addEventListener('click', () => {
       const kind = btn.getAttribute('data-remove-kind');
       const idx = Number(btn.getAttribute('data-remove-idx'));
-      if(kind === 'kept') policyFileState.kept.splice(idx, 1);
-      else policyFileState.newFiles.splice(idx, 1);
+      if(kind === 'kept') fileState.kept.splice(idx, 1);
+      else fileState.newFiles.splice(idx, 1);
       renderFileList();
     });
   });
@@ -624,14 +672,46 @@ function attachHandlers(){
       const data = Object.fromEntries(fd.entries());
       const editingId = view.params && view.params.assetId;
       const originKind = (view.params && view.params.kind) || data.type;
-      if(editingId){
-        const idx = assets.findIndex(a => a.id === editingId);
-        assets[idx] = { ...assets[idx], ...data };
-      } else {
-        assets.push({ id: uid(), createdAt: todayStr(), ...data });
+
+      const submitBtn = assetForm.querySelector('button[type="submit"]');
+      const originalLabel = submitBtn.textContent;
+      submitBtn.disabled = true;
+
+      try{
+        let encodedNew = [];
+        if(fileState.newFiles.length){
+          submitBtn.textContent = 'กำลังแปลงไฟล์...';
+          encodedNew = await encodeFilesToBase64(fileState.newFiles);
+        }
+        data.docFiles = [...fileState.kept, ...encodedNew];
+
+        const record = editingId
+          ? { ...assets.find(a => a.id === editingId), ...data, id: editingId }
+          : { id: uid(), createdAt: todayStr(), ...data };
+
+        if(estimateBytes(record) > MAX_POLICY_DOC_BYTES){
+          alert('ไฟล์แนบรวมกันใหญ่เกินไป (เกิน ~700 KB) กรุณาลดจำนวนไฟล์ หรือใช้ไฟล์ที่บีบอัด/ขนาดเล็กลง แล้วลองใหม่');
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalLabel;
+          return;
+        }
+
+        submitBtn.textContent = 'กำลังบันทึก...';
+        await saveAsset(record);
+
+        if(editingId){
+          const idx = assets.findIndex(a => a.id === editingId);
+          assets[idx] = record;
+        } else {
+          assets.push(record);
+        }
+        go('dashboard', { kind: originKind });
+      }catch(err){
+        console.error('บันทึกข้อมูลไม่สำเร็จ', err);
+        alert('บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalLabel;
       }
-      await saveAssets();
-      go('dashboard', { kind: originKind });
     });
   }
   const btnDeleteAsset = document.getElementById('btnDeleteAsset');
@@ -642,7 +722,7 @@ function attachHandlers(){
       const toDelete = policies.filter(p => p.assetId === editingId);
       assets = assets.filter(a => a.id !== editingId);
       policies = policies.filter(p => p.assetId !== editingId);
-      await saveAssets();
+      await deleteAssetDoc(editingId);
       for(const p of toDelete) await deletePolicyDoc(p.id);
       go('dashboard', { kind });
     });
@@ -662,7 +742,7 @@ function attachHandlers(){
   const docFilesInput = document.getElementById('docFilesInput');
   if(docFilesInput){
     docFilesInput.addEventListener('change', () => {
-      policyFileState.newFiles.push(...Array.from(docFilesInput.files));
+      fileState.newFiles.push(...Array.from(docFilesInput.files));
       docFilesInput.value = '';
       renderFileList();
     });
@@ -685,11 +765,11 @@ function attachHandlers(){
 
       try{
         let encodedNew = [];
-        if(policyFileState.newFiles.length){
+        if(fileState.newFiles.length){
           submitBtn.textContent = 'กำลังแปลงไฟล์...';
-          encodedNew = await encodeFilesToBase64(policyFileState.newFiles);
+          encodedNew = await encodeFilesToBase64(fileState.newFiles);
         }
-        data.docFiles = [...policyFileState.kept, ...encodedNew];
+        data.docFiles = [...fileState.kept, ...encodedNew];
 
         const record = editingId
           ? { ...(policies.find(p => p.id === editingId)), ...data, id: editingId, assetId }
