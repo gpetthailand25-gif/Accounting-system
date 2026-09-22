@@ -50,6 +50,7 @@ const KINDS = {
 
 let assets = [];
 let policies = [];
+let loadWarning = null; // ข้อความแจ้งเตือนถ้าโหลดข้อมูลบางรายการไม่สำเร็จ (ไม่ต้องการให้ผู้ใช้เข้าใจผิดว่าข้อมูลหายจริง)
 let view = { name: 'dashboard', params: { kind: KINDS[new URLSearchParams(location.search).get('kind')] ? new URLSearchParams(location.search).get('kind') : 'factory' } };
 
 // สถานะไฟล์แนบของฟอร์มที่กำลังเปิดอยู่ (ใช้ร่วมกันทั้งฟอร์มโรงงาน/รถยนต์ และฟอร์มกรมธรรม์ รีเซ็ตทุกครั้งที่เข้าฟอร์ม)
@@ -146,12 +147,20 @@ async function loadAssets(){
   }catch(e){ keys = []; }
 
   if(keys.length > 0){
+    const failedKeys = [];
     const items = await Promise.all(keys.map(async k => {
       try{
         const r = await window.storage.get(k);
         return JSON.parse(r.value);
-      }catch(e){ return null; }
+      }catch(e){
+        console.error('โหลดรายการทรัพย์สินไม่สำเร็จ:', k, e);
+        failedKeys.push(k);
+        return null;
+      }
     }));
+    if(failedKeys.length){
+      loadWarning = `โหลดรายการโรงงาน/รถยนต์ไม่สำเร็จ ${failedKeys.length} จาก ${keys.length} รายการ (ข้อมูลอาจยังไม่หาย แค่อ่านไม่สำเร็จชั่วคราว) กรุณาลองรีเฟรชหน้าอีกครั้ง หากยังไม่หายให้แจ้งผู้ดูแลระบบ`;
+    }
     return items.filter(Boolean);
   }
 
@@ -160,10 +169,20 @@ async function loadAssets(){
     const legacy = await window.storage.get(STORAGE_KEY_ASSETS);
     const legacyAssets = legacy ? JSON.parse(legacy.value) : [];
     if(legacyAssets.length){
+      let migratedCount = 0;
       for(const a of legacyAssets){
-        await window.storage.set(assetDocKey(a.id), JSON.stringify(a), false);
+        try{
+          await window.storage.set(assetDocKey(a.id), JSON.stringify(a), false);
+          migratedCount++;
+        }catch(e){
+          console.error('ย้ายข้อมูลรายการไม่สำเร็จ:', a.id, e);
+        }
       }
-      try{ await window.storage.delete(STORAGE_KEY_ASSETS); }catch(e){ /* ไม่เป็นไรถ้าลบไม่ได้ */ }
+      // หมายเหตุ: จงใจ "ไม่ลบ" คีย์เดิม 'assets' หลัง migrate อีกต่อไป
+      // เก็บไว้เป็นข้อมูลสำรองเผื่อรายการใดย้ายไม่สำเร็จ ผู้ใช้/ผู้ดูแลระบบลบเองภายหลังได้เมื่อมั่นใจว่าข้อมูลใหม่ครบถ้วน
+      if(migratedCount < legacyAssets.length){
+        loadWarning = `ย้ายข้อมูลรูปแบบใหม่ได้ ${migratedCount} จาก ${legacyAssets.length} รายการ ข้อมูลต้นฉบับยังอยู่ครบ ไม่ได้ถูกลบ กรุณาลองรีเฟรชอีกครั้ง`;
+      }
     }
     return legacyAssets;
   }catch(e){
@@ -189,12 +208,21 @@ async function loadPolicies(){
   }catch(e){ keys = []; }
 
   if(keys.length > 0){
+    const failedKeys = [];
     const items = await Promise.all(keys.map(async k => {
       try{
         const r = await window.storage.get(k);
         return JSON.parse(r.value);
-      }catch(e){ return null; }
+      }catch(e){
+        console.error('โหลดกรมธรรม์ไม่สำเร็จ:', k, e);
+        failedKeys.push(k);
+        return null;
+      }
     }));
+    if(failedKeys.length){
+      const msg = `โหลดกรมธรรม์ไม่สำเร็จ ${failedKeys.length} จาก ${keys.length} รายการ (ข้อมูลอาจยังไม่หาย แค่อ่านไม่สำเร็จชั่วคราว) กรุณาลองรีเฟรชหน้าอีกครั้ง หากยังไม่หายให้แจ้งผู้ดูแลระบบ`;
+      loadWarning = loadWarning ? (loadWarning + ' / ' + msg) : msg;
+    }
     return items.filter(Boolean);
   }
 
@@ -203,10 +231,20 @@ async function loadPolicies(){
     const legacy = await window.storage.get(STORAGE_KEY_POLICIES_LEGACY);
     const legacyPolicies = legacy ? JSON.parse(legacy.value) : [];
     if(legacyPolicies.length){
+      let migratedCount = 0;
       for(const p of legacyPolicies){
-        await window.storage.set(policyDocKey(p.id), JSON.stringify(p), false);
+        try{
+          await window.storage.set(policyDocKey(p.id), JSON.stringify(p), false);
+          migratedCount++;
+        }catch(e){
+          console.error('ย้ายกรมธรรม์ไม่สำเร็จ:', p.id, e);
+        }
       }
-      try{ await window.storage.delete(STORAGE_KEY_POLICIES_LEGACY); }catch(e){ /* ไม่เป็นไรถ้าลบไม่ได้ */ }
+      // หมายเหตุ: จงใจ "ไม่ลบ" คีย์เดิม 'policies' หลัง migrate อีกต่อไป เก็บไว้เป็นข้อมูลสำรอง
+      if(migratedCount < legacyPolicies.length){
+        const msg = `ย้ายกรมธรรม์รูปแบบใหม่ได้ ${migratedCount} จาก ${legacyPolicies.length} รายการ ข้อมูลต้นฉบับยังอยู่ครบ ไม่ได้ถูกลบ กรุณาลองรีเฟรชอีกครั้ง`;
+        loadWarning = loadWarning ? (loadWarning + ' / ' + msg) : msg;
+      }
     }
     return legacyPolicies;
   }catch(e){
@@ -245,7 +283,7 @@ function render(){
     };
   }
 
-  app.innerHTML = topbarHtml() + kindTabsHtml() + bodyHtml();
+  app.innerHTML = (loadWarning ? warningBannerHtml(loadWarning) : '') + topbarHtml() + kindTabsHtml() + bodyHtml();
   attachHandlers();
 
   // คืนโฟกัส/ตำแหน่งเคอร์เซอร์กลับไปที่ element เดิม (เช่น ช่องค้นหา)
@@ -260,6 +298,11 @@ function render(){
   }
 }
 
+function warningBannerHtml(msg){
+  return `<div style="background:#fff3e0;border:1px solid #f0c36d;color:#7a4a00;padding:10px 16px;font-size:13px;line-height:1.5;">
+    ⚠️ ${escapeHtml(msg)}
+  </div>`;
+}
 function topbarHtml(){
   const kind = currentKind();
   const k = KINDS[kind];

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ตรวจสอบข้อมูลดิบ (อ่านอย่างเดียว)</title>
+<style>
+  body{font-family:system-ui,-apple-system,'Segoe UI',Tarhu,Sarabun,sans-serif;background:#f5f6f8;margin:0;padding:24px;color:#1c1f24;}
+  h1{font-size:18px;margin:0 0 4px;}
+  p.hint{color:#6b7280;font-size:13px;margin:0 0 20px;}
+  .warn{background:#fff7e6;border:1px solid #f0c36d;border-radius:8px;padding:12px 14px;font-size:13px;margin-bottom:18px;}
+  table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08);}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eee;font-size:13px;vertical-align:top;}
+  th{background:#f0f1f3;position:sticky;top:0;}
+  tr.grp-asset{background:#eef6ff;}
+  tr.grp-policy{background:#f2fbf5;}
+  tr.grp-legacy{background:#fff3e0;}
+  tr.grp-other{background:#fff;}
+  .key{font-family:ui-monospace,Consolas,monospace;font-weight:600;}
+  .size{color:#6b7280;white-space:nowrap;}
+  .preview{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:#374151;max-width:520px;overflow-wrap:anywhere;}
+  .summary{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;}
+  .summary div{background:#fff;border-radius:8px;padding:10px 14px;font-size:13px;box-shadow:0 1px 3px rgba(0,0,0,.08);}
+  .summary b{font-size:16px;display:block;}
+  #status{font-size:13px;color:#6b7280;margin-bottom:12px;}
+</style>
+</head>
+<body>
+  <h1>ตรวจสอบข้อมูลดิบใน Firestore (kv_store)</h1>
+  <p class="hint">หน้านี้อ่านข้อมูลอย่างเดียว ไม่มีการแก้ไข/ลบใดๆ ทั้งสิ้น ใช้เพื่อดูว่าจริงๆ แล้วมีคีย์อะไรอยู่บ้าง</p>
+  <div class="warn">ถ้าเห็นคีย์ <code>asset:...</code> หรือ <code>policy:...</code> หลายรายการ แปลว่าข้อมูลยังอยู่ครบ เพียงแต่หน้าแอปอาจอ่านไม่ถูกวิธี — ไม่ได้ถูกลบไปจริง</div>
+  <div id="status">กำลังเชื่อมต่อ...</div>
+  <div class="summary" id="summary" style="display:none;"></div>
+  <table id="tbl" style="display:none;">
+    <thead><tr><th>คีย์ (key)</th><th>ขนาดข้อมูล</th><th>อัปเดตล่าสุด</th><th>ตัวอย่างข้อมูล (200 ตัวอักษรแรก)</th></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+
+<script>
+function groupOf(key){
+  if(key.startsWith('asset:')) return 'grp-asset';
+  if(key.startsWith('policy:')) return 'grp-policy';
+  if(key === 'assets' || key === 'policies' || key === 'equipment' || key === 'categories') return 'grp-legacy';
+  return 'grp-other';
+}
+function fmtBytes(n){
+  if(n < 1024) return n + ' B';
+  if(n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+  return (n/1024/1024).toFixed(2) + ' MB';
+}
+function fmtTs(ts){
+  try{
+    if(ts && ts.toDate) return ts.toDate().toLocaleString('th-TH');
+  }catch(e){}
+  return '-';
+}
+
+(async function(){
+  const statusEl = document.getElementById('status');
+  try{
+    const db = firebase.firestore();
+    const snap = await db.collection('kv_store').get();
+
+    const rows = snap.docs.map(d => {
+      const data = d.data();
+      const raw = (data && typeof data.value === 'string') ? data.value : JSON.stringify(data.value || '');
+      return {
+        key: d.id,
+        size: new Blob([raw]).size,
+        updatedAt: data.updatedAt,
+        preview: raw.slice(0, 200)
+      };
+    }).sort((a,b) => a.key.localeCompare(b.key));
+
+    statusEl.textContent = `พบทั้งหมด ${rows.length} คีย์ในฐานข้อมูล`;
+
+    const assetKeys = rows.filter(r => r.key.startsWith('asset:'));
+    const policyKeys = rows.filter(r => r.key.startsWith('policy:'));
+    const legacyAssets = rows.find(r => r.key === 'assets');
+    const legacyPolicies = rows.find(r => r.key === 'policies');
+
+    const summaryEl = document.getElementById('summary');
+    summaryEl.style.display = 'flex';
+    summaryEl.innerHTML = `
+      <div><b>${assetKeys.length}</b>คีย์ asset:*</div>
+      <div><b>${policyKeys.length}</b>คีย์ policy:*</div>
+      <div><b>${legacyAssets ? 'มี (' + fmtBytes(legacyAssets.size) + ')' : 'ไม่มี'}</b>คีย์เดิม "assets"</div>
+      <div><b>${legacyPolicies ? 'มี (' + fmtBytes(legacyPolicies.size) + ')' : 'ไม่มี'}</b>คีย์เดิม "policies"</div>
+    `;
+
+    const tbody = document.getElementById('tbody');
+    tbody.innerHTML = rows.map(r => `
+      <tr class="${groupOf(r.key)}">
+        <td class="key">${r.key}</td>
+        <td class="size">${fmtBytes(r.size)}</td>
+        <td>${fmtTs(r.updatedAt)}</td>
+        <td class="preview">${r.preview.replace(/</g,'&lt;')}</td>
+      </tr>
+    `).join('');
+    document.getElementById('tbl').style.display = rows.length ? 'table' : 'none';
+    if(rows.length === 0) statusEl.textContent = 'ไม่พบคีย์ใดๆ เลยในฐานข้อมูล (collection kv_store ว่างเปล่า)';
+  }catch(err){
+    statusEl.textContent = 'เชื่อมต่อหรืออ่านข้อมูลไม่สำเร็จ: ' + (err && err.message ? err.message : err);
+    console.error(err);
+  }
+})();
+</script>
+</body>
+</html>
