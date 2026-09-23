@@ -422,6 +422,9 @@
   var SALE_METHOD_LABEL = "ขาย";
   function isSaleMethod(method) { return typeof method === "string" && method.indexOf(SALE_METHOD_LABEL) !== -1; }
   var ROLE_LABELS = { accounting: "ฝ่ายบัญชี", production: "ฝ่ายโปรดักชั่น" };
+  // Only accounting is allowed to see money/price figures anywhere in the app.
+  function canSeePrices() { return state.role === "accounting"; }
+  var PRICE_MASK = "•••";
   var DEFAULT_SETTINGS = {
     products: [],
     lines: ["ไลน์ขนมปัง", "ไลน์เค้ก", "ไลน์คุกกี้"],
@@ -467,6 +470,7 @@
     receiveSearch: "",
     printModalOpen: false,
     confirmDeleteEntryId: null,
+    confirmCancelWithdrawId: null,
     printDefaults: null,
     stockSelectedIds: {},
     bulkWithdrawOpen: false,
@@ -511,7 +515,7 @@
   function daysAgo(n) { var d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); }
   function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
   function fmtNum(n) { return (n || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 }); }
-  function fmtBaht(n) { return (n || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 }); }
+  function fmtBaht(n) { return canSeePrices() ? (n || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 }) : PRICE_MASK; }
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
@@ -790,6 +794,7 @@
       renderPrintModal() +
       renderBulkWithdrawModal() +
       renderDeleteConfirmModal() +
+      renderCancelWithdrawConfirmModal() +
       renderEntryDetailModal() +
       renderDeleteConfirmProductModal() +
       renderDeleteConfirmProdLogModal();
@@ -1018,6 +1023,22 @@
           '<div style="margin:6px 0 16px;color:var(--text-muted);">ต้องการลบรายการ' + (desc ? " " + desc : "") + " นี้ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้" + "</div>" +
           '<button class="wt-submit" type="button" data-action="confirmDeleteEntry" style="background:var(--danger);border-color:var(--danger);">ลบรายการ</button>' +
           '<button class="wt-cancel-link" type="button" data-action="cancelDeleteEntry" style="display:block;text-align:center;width:100%;margin-top:10px;">ยกเลิก</button>' +
+        "</div>" +
+      "</div>"
+    );
+  }
+
+  function renderCancelWithdrawConfirmModal() {
+    if (!state.confirmCancelWithdrawId) return "";
+    var entry = state.entries.find(function (x) { return x.id === state.confirmCancelWithdrawId; });
+    var desc = entry ? esc(entry.productName) + " · " + esc(entry.date) : "";
+    return (
+      '<div class="wt-lightbox" data-action="cancelCancelWithdraw" style="align-items:flex-start;padding-top:60px;">' +
+        '<div class="wt-card" style="width:340px;max-width:90vw;text-align:left;">' +
+          "<h3>ยืนยันการยกเลิกการเบิก</h3>" +
+          '<div style="margin:6px 0 16px;color:var(--text-muted);">ต้องการยกเลิกการเบิกรายการ' + (desc ? " " + desc : "") + " ใช่หรือไม่? รายการนี้จะถูกนำกลับเข้าคลัง (สถานะ \"อยู่ในคลัง\") และล้างข้อมูลการเบิก/การขายของรายการนี้ทิ้ง" + "</div>" +
+          '<button class="wt-submit" type="button" data-action="confirmCancelWithdraw" style="background:var(--danger);border-color:var(--danger);">ยกเลิกการเบิก</button>' +
+          '<button class="wt-cancel-link" type="button" data-action="cancelCancelWithdraw" style="display:block;text-align:center;width:100%;margin-top:10px;">ปิด</button>' +
         "</div>" +
       "</div>"
     );
@@ -1469,16 +1490,22 @@
               (noProducts ? '<div class="wt-hint">ยังไม่มีสินค้าในระบบ — <button type="button" class="wt-link" data-action="setTab" data-tab="settings">ไปที่หน้าตั้งค่าเพื่อเพิ่มสินค้า</button></div>' : "") +
             "</div>" +
 
-            '<div class="wt-row3">' +
+            '<div class="' + (canSeePrices() ? "wt-row3" : "wt-row2") + '">' +
               '<div class="wt-field"><label>จำนวน</label><input type="number" step="0.01" min="0" placeholder="0" id="quantityField" data-live-total value="' + esc(initialQty) + '"></div>' +
               '<div class="wt-field"><label>หน่วย</label><select id="unitField">' + buildUnitSelectOptions(initialUnit) + "</select></div>" +
-              '<div class="wt-field"><label>ราคา/หน่วย (บาท)</label><input type="number" step="0.01" min="0" placeholder="0.00" id="unitPriceField" data-live-total value="' + esc(initialPrice) + '"></div>' +
+              (canSeePrices()
+                ? '<div class="wt-field"><label>ราคา/หน่วย (บาท)</label><input type="number" step="0.01" min="0" placeholder="0.00" id="unitPriceField" data-live-total value="' + esc(initialPrice) + '"></div>'
+                : '<input type="hidden" id="unitPriceField" value="' + esc(initialPrice) + '">') +
             "</div>" +
-            '<div class="wt-hint" id="unitMismatchHint" style="margin-top:-8px;margin-bottom:14px;' + (matchedProduct && initialUnit && findProductUnitPrice(matchedProduct, initialUnit) === null ? "" : "display:none;") + '">' +
-              (matchedProduct ? "ยังไม่ได้ตั้งราคาไว้สำหรับหน่วยนี้ — กรุณาระบุราคาเอง" : "") +
-            "</div>" +
+            (canSeePrices()
+              ? '<div class="wt-hint" id="unitMismatchHint" style="margin-top:-8px;margin-bottom:14px;' + (matchedProduct && initialUnit && findProductUnitPrice(matchedProduct, initialUnit) === null ? "" : "display:none;") + '">' +
+                  (matchedProduct ? "ยังไม่ได้ตั้งราคาไว้สำหรับหน่วยนี้ — กรุณาระบุราคาเอง" : "") +
+                "</div>"
+              : "") +
 
-            '<div class="wt-total-box"><span class="lbl">มูลค่าของเสียรวม</span><span class="val" id="totalAmountDisplay">' + fmtBaht(initialTotal) + " บาท</span></div>" +
+            (canSeePrices()
+              ? '<div class="wt-total-box"><span class="lbl">มูลค่าของเสียรวม</span><span class="val" id="totalAmountDisplay">' + fmtBaht(initialTotal) + " บาท</span></div>"
+              : '<span id="totalAmountDisplay" style="display:none;"></span>') +
 
             '<div class="wt-field"><label>ไลน์ผลิต/แผนก</label><select id="lineField">' + lineOptions + "</select></div>" +
             '<div class="wt-field"><label>ตำแหน่งที่เก็บของเสีย</label><select id="locationField">' + locationOptions + "</select>" +
@@ -1597,14 +1624,18 @@
               (noProducts ? '<div class="wt-hint">ยังไม่มีสินค้าในระบบ — <button type="button" class="wt-link" data-action="setTab" data-tab="settings">ไปที่หน้าตั้งค่าเพื่อเพิ่มสินค้า</button></div>' : "") +
             "</div>" +
 
-            '<div class="wt-row3">' +
+            '<div class="' + (canSeePrices() ? "wt-row3" : "wt-row2") + '">' +
               '<div class="wt-field"><label>จำนวน</label><input type="number" step="0.01" min="0" placeholder="0" id="quantityField" data-live-total value=""></div>' +
               '<div class="wt-field"><label>หน่วย</label><select id="unitField">' + buildUnitSelectOptions("") + "</select></div>" +
-              '<div class="wt-field"><label>ราคา/หน่วย (บาท)</label><input type="number" step="0.01" min="0" placeholder="0.00" id="unitPriceField" data-live-total value=""></div>' +
+              (canSeePrices()
+                ? '<div class="wt-field"><label>ราคา/หน่วย (บาท)</label><input type="number" step="0.01" min="0" placeholder="0.00" id="unitPriceField" data-live-total value=""></div>'
+                : '<input type="hidden" id="unitPriceField" value="">') +
             "</div>" +
-            '<div class="wt-hint" id="unitMismatchHint" style="margin-top:-8px;margin-bottom:14px;display:none;"></div>' +
+            (canSeePrices() ? '<div class="wt-hint" id="unitMismatchHint" style="margin-top:-8px;margin-bottom:14px;display:none;"></div>' : "") +
 
-            '<div class="wt-total-box"><span class="lbl">มูลค่ารับเข้ารวม</span><span class="val" id="totalAmountDisplay">' + fmtBaht(0) + " บาท</span></div>" +
+            (canSeePrices()
+              ? '<div class="wt-total-box"><span class="lbl">มูลค่ารับเข้ารวม</span><span class="val" id="totalAmountDisplay">' + fmtBaht(0) + " บาท</span></div>"
+              : '<span id="totalAmountDisplay" style="display:none;"></span>') +
 
             '<div class="wt-field"><label>ตำแหน่งที่เก็บของเสีย</label><select id="locationField">' + locationOptions + "</select></div>" +
 
@@ -1961,6 +1992,7 @@
           "<td>" + esc(e.method || "–") + "</td>" +
           '<td class="wt-mono">' + (e.saleQuantity != null ? (fmtNum(e.saleQuantity) + " " + esc(e.saleUnit || e.unit)) : '<span class="wt-prod-code">–</span>') + "</td>" +
           '<td class="wt-mono" style="color:var(--good);">' + (e.salePrice != null ? (fmtBaht(e.salePrice) + " บ.") : '<span class="wt-prod-code">–</span>') + "</td>" +
+          '<td><button type="button" class="wt-link" style="color:var(--danger);" data-action="cancelWithdrawItem" data-id="' + esc(e.id) + '" title="เบิกรายการนี้ผิด — นำกลับเข้าคลัง">↩ ยกเลิก</button></td>' +
         "</tr>";
       }).join("");
       return (
@@ -1978,7 +2010,7 @@
             '<button type="button" class="wt-edit-btn" style="background:var(--accent);color:#fff;" data-action="reprintDocument" data-key="' + esc(g.key) + '">🖨 พิมพ์อีกครั้ง</button>' +
           "</div>" +
           '<div class="wt-table-wrap" style="margin-top:10px;"><table class="wt-table"><thead><tr>' +
-            "<th>เลขที่รายการ</th><th>สินค้า</th><th>จำนวน</th><th>มูลค่าของเสีย</th><th>วิธีการจัดการ</th><th>จำนวนที่ขาย</th><th>ขายได้จริง</th>" +
+            "<th>เลขที่รายการ</th><th>สินค้า</th><th>จำนวน</th><th>มูลค่าของเสีย</th><th>วิธีการจัดการ</th><th>จำนวนที่ขาย</th><th>ขายได้จริง</th><th></th>" +
           "</tr></thead><tbody>" + itemsHtml + "</tbody></table></div>" +
         "</div>"
       );
@@ -2001,6 +2033,26 @@
     persistEntry(entry).catch(function (err) { console.error(err); });
     render();
     buildAndOpenHistoryBatchPrint(g.entries, docNumber);
+  }
+
+  // Undo a single mistakenly-withdrawn entry: put it back "in stock" and
+  // clear everything that was only recorded at withdrawal time, so it looks
+  // exactly like it never left the warehouse.
+  function handleConfirmCancelWithdraw() {
+    var id = state.confirmCancelWithdrawId;
+    state.confirmCancelWithdrawId = null;
+    var entry = state.entries.find(function (x) { return x.id === id; });
+    if (!entry) { render(); return; }
+    entry.stockStatus = "in_stock";
+    entry.withdrawnAt = "";
+    entry.withdrawnNote = "";
+    entry.docNumber = null;
+    entry.method = "";
+    entry.salePrice = null;
+    entry.saleQuantity = null;
+    entry.saleUnit = null;
+    render();
+    persistEntry(entry).catch(function (err) { console.error(err); });
   }
 
   function renderStockSummaryRowsHtml(list) {
@@ -2048,8 +2100,9 @@
   function exportStockSummaryCsv() {
     var list = getStockProductSummary();
     var header = "รหัส,ชื่อสินค้า,หน่วย,รับเข้า (จำนวน),รับเข้า (มูลค่า),ตัดออก (จำนวน),ตัดออก (มูลค่า),คงเหลือ (จำนวน),คงเหลือ (มูลค่า)\n";
+    var hidePrice = !canSeePrices();
     var rows = list.map(function (p) {
-      return [p.code, p.name, p.unit, p.inQty, p.inVal, p.outQty, p.outVal, p.remainQty, p.remainVal]
+      return [p.code, p.name, p.unit, p.inQty, hidePrice ? PRICE_MASK : p.inVal, p.outQty, hidePrice ? PRICE_MASK : p.outVal, p.remainQty, hidePrice ? PRICE_MASK : p.remainVal]
         .map(function (v) { return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; }).join(",");
     }).join("\n");
     var blob = new Blob(["\uFEFF" + header + rows], { type: "text/csv;charset=utf-8;" });
@@ -2072,9 +2125,10 @@
     var header = "เลขที่รายการ,วันที่บันทึก,รหัสสินค้า,ชื่อสินค้า,จำนวน,หน่วย,มูลค่ารวม,ตำแหน่งที่เก็บ,ค้างในคลัง (วัน)\n";
     var runNumbers = computeEntryRunNumbers();
     var today = todayStr();
+    var hidePrice = !canSeePrices();
     var rows = list.map(function (e) {
       var days = computeEntryDaysInStock(e, today);
-      return [runNumbers[e.id] || "", e.date, e.productCode, e.productName, e.quantity, e.unit, e.totalAmount, e.location, days]
+      return [runNumbers[e.id] || "", e.date, e.productCode, e.productName, e.quantity, e.unit, hidePrice ? PRICE_MASK : e.totalAmount, e.location, days]
         .map(function (v) { return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; }).join(",");
     }).join("\n");
     var blob = new Blob(["\uFEFF" + header + rows], { type: "text/csv;charset=utf-8;" });
@@ -3000,6 +3054,13 @@
       case "cancelDeleteEntry":
         if (e.target === el) { state.confirmDeleteEntryId = null; render(); }
         break;
+      case "cancelWithdrawItem":
+        state.confirmCancelWithdrawId = el.getAttribute("data-id");
+        render(); break;
+      case "confirmCancelWithdraw": handleConfirmCancelWithdraw(); break;
+      case "cancelCancelWithdraw":
+        if (e.target === el) { state.confirmCancelWithdrawId = null; render(); }
+        break;
       case "editEntry":
         var editTarget = state.entries.find(function (x) { return x.id === el.getAttribute("data-id"); });
         if (editTarget) {
@@ -3239,10 +3300,10 @@
     if (e.target.id === "productSearchField" && e.key === "Escape") closeProductCombo();
   });
 
-  // Document number always runs off the report's start date (จากวันที่), not
-  // today's date, so it stays correct even when printing for a past period.
+  // Document number always runs off the report's start date (จากวันที่),
+  // and the sequence always starts at 001 (never counts up).
   function buildDocNumber(startDate) {
-    return "WR-" + String(startDate || todayStr()).replace(/-/g, "") + "-" + String(state.entries.length + 1).padStart(3, "0");
+    return "WR-" + String(startDate || todayStr()).replace(/-/g, "") + "-001";
   }
 
   function handleGeneratePrint() {
@@ -3542,11 +3603,12 @@
     var sorted = getFilteredLedgerEntries();
     var header = "เลขที่รายการ,วันที่,รหัสสินค้า,ชื่อสินค้า,ประเภท,จำนวน,หน่วย,ราคาต่อหน่วย,มูลค่ารวม,จำนวนที่ขาย,หน่วยที่ขาย,ราคาที่ขายได้,ไลน์ผลิต,วิธีจัดการ,ตำแหน่งที่เก็บ,สถานะคลัง,วันที่เบิก,เลขที่เอกสาร,หมายเหตุการเบิก,หมายเหตุ,สาเหตุ&แนวทางแก้ไข,สถานะ\n";
     var runNumbers = computeEntryRunNumbers();
+    var hidePrice = !canSeePrices();
     var rows = sorted.map(function (e) {
       var t = findWasteType(e.type).label;
       var status = getEntryStatus(e).label;
       var stock = getStockStatusInfo(e).label;
-      return [runNumbers[e.id] || "", e.date, e.productCode, e.productName, t, e.quantity, e.unit, e.unitPrice, e.totalAmount, (e.saleQuantity != null ? e.saleQuantity : ""), (e.saleUnit || ""), (e.salePrice != null ? e.salePrice : ""), e.line, e.method, e.location, stock, e.withdrawnAt, (e.docNumber || ""), e.withdrawnNote, e.note, e.rootCause, status]
+      return [runNumbers[e.id] || "", e.date, e.productCode, e.productName, t, e.quantity, e.unit, hidePrice ? PRICE_MASK : e.unitPrice, hidePrice ? PRICE_MASK : e.totalAmount, (e.saleQuantity != null ? e.saleQuantity : ""), (e.saleUnit || ""), (hidePrice ? PRICE_MASK : (e.salePrice != null ? e.salePrice : "")), e.line, e.method, e.location, stock, e.withdrawnAt, (e.docNumber || ""), e.withdrawnNote, e.note, e.rootCause, status]
         .map(function (v) { return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; }).join(",");
     }).join("\n");
     var blob = new Blob(["\uFEFF" + header + rows], { type: "text/csv;charset=utf-8;" });
