@@ -2184,9 +2184,11 @@
   }
 
   function getStockProductSummary() {
+    // Same fix as the inline prodMap in renderStockTab: group by product
+    // code+name *and unit*, so mixed-unit stock is never summed as one number.
     var prodMap = {};
     state.entries.forEach(function (e) {
-      var key = (e.productCode || "") + "||" + e.productName;
+      var key = (e.productCode || "") + "||" + e.productName + "||" + e.unit;
       if (!prodMap[key]) prodMap[key] = {
         name: e.productName, code: e.productCode, unit: e.unit,
         inQty: 0, inVal: 0, outQty: 0, outVal: 0, remainQty: 0, remainVal: 0, remainCount: 0
@@ -2270,9 +2272,12 @@
     var maxLoc = byLocation.length ? byLocation[0].value : 1;
 
     // ---- per-product summary: received (all logged) / withdrawn / remaining ----
+    // Grouped by product code+name *and unit* — a product logged in two
+    // different units (e.g. กก. and ชิ้น) must never have its quantities
+    // summed together into one misleading number, so each unit gets its own row.
     var prodMap = {};
     allEntries.forEach(function (e) {
-      var key = (e.productCode || "") + "||" + e.productName;
+      var key = (e.productCode || "") + "||" + e.productName + "||" + e.unit;
       if (!prodMap[key]) prodMap[key] = {
         name: e.productName, code: e.productCode, unit: e.unit,
         inQty: 0, inVal: 0, outQty: 0, outVal: 0, remainQty: 0, remainVal: 0, remainCount: 0
