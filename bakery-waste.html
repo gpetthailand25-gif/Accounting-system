@@ -516,6 +516,11 @@
   function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
   function fmtNum(n) { return (n || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 }); }
   function fmtBaht(n) { return canSeePrices() ? (n || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 }) : PRICE_MASK; }
+  // Unlike fmtBaht, always shows the number regardless of role — used for the
+  // "จำนวนเงินที่ขายได้จริง" (actual sale amount) on the withdraw print report,
+  // which ฝ่ายโปรดักชั่น (production) should be able to see even though other
+  // money figures (waste value, unit price) stay masked for that role.
+  function fmtBahtAlways(n) { return (n || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 }); }
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
@@ -863,16 +868,59 @@
       "</div>";
   }
 
+  // ---- print-report modal: pick a date range, then fine-tune with checkboxes ----
+  function getEntriesInRange(start, end) {
+    return state.entries.filter(function (e) { return e.date >= start && e.date <= end; })
+      .sort(function (a, b) { return (a.date + a.createdAt).localeCompare(b.date + b.createdAt); });
+  }
+
+  function renderPrintChecklistHtml(entries) {
+    if (entries.length === 0) return '<div class="wt-hint">ไม่มีรายการในช่วงวันที่นี้</div>';
+    return '<div style="max-height:280px;overflow-y:auto;overflow-x:hidden;border:1px solid var(--border);border-radius:var(--r-sm);padding:2px 12px;">' +
+      entries.map(function (e) {
+        return '<label style="display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--border);font-size:13.5px;cursor:pointer;">' +
+          '<input type="checkbox" class="wt-print-entry-check" data-id="' + esc(e.id) + '" checked style="appearance:auto;-webkit-appearance:auto;width:16px;height:16px;min-width:16px;padding:0;margin:3px 0 0;background:none;border:none;flex:0 0 auto;">' +
+          '<span style="flex:1;min-width:0;">' +
+            '<div>' + esc(e.productName) + "</div>" +
+            '<div class="wt-prod-code wt-mono" style="margin-top:2px;">' + esc(e.date) + " · " + fmtNum(e.quantity) + " " + esc(e.unit) + "</div>" +
+          "</span>" +
+        "</label>";
+      }).join("") +
+    "</div>";
+  }
+
+  function refreshPrintChecklist() {
+    var startField = document.getElementById("printStartDate");
+    var endField = document.getElementById("printEndDate");
+    var wrap = document.getElementById("printEntriesChecklistWrap");
+    var countLabel = document.getElementById("printEntriesCountLabel");
+    if (!startField || !endField || !wrap) return;
+    var entries = getEntriesInRange(startField.value, endField.value);
+    wrap.innerHTML = renderPrintChecklistHtml(entries);
+    if (countLabel) countLabel.textContent = entries.length + " รายการ";
+  }
+
   function renderPrintModal() {
     if (!state.printModalOpen) return "";
     var d = state.printDefaults || {};
+    var printEntries = getEntriesInRange(d.start, d.end);
     return (
       '<div class="wt-lightbox" data-action="closePrintModal" style="align-items:flex-start;padding-top:60px;">' +
-        '<div class="wt-card" style="width:340px;max-width:90vw;text-align:left;">' +
+        '<div class="wt-card" style="width:560px;max-width:94vw;text-align:left;max-height:88vh;overflow-y:auto;">' +
           "<h3>สร้างรายงานสำหรับพิมพ์</h3>" +
           '<div class="wt-field"><label>จากวันที่</label><input type="date" id="printStartDate" value="' + esc(d.start) + '"></div>' +
           '<div class="wt-field"><label>ถึงวันที่</label><input type="date" id="printEndDate" value="' + esc(d.end) + '"></div>' +
           '<div class="wt-field"><label>เลขที่เอกสาร</label><input id="printDocNumber" value="' + esc(d.docNumber) + '"></div>' +
+          '<div class="wt-field">' +
+            '<label>รายการที่จะรวมในรายงาน (<span id="printEntriesCountLabel">' + printEntries.length + " รายการ</span>)</label>" +
+            '<div class="wt-hint" style="margin:-2px 0 8px;">ยกเลิกติ๊กรายการที่ไม่ต้องการรวมในรายงานได้ (ค่าเริ่มต้นเลือกทั้งหมด)</div>' +
+            '<div style="display:flex;gap:14px;margin-bottom:8px;">' +
+              '<button type="button" class="wt-link" data-action="printSelectAll">เลือกทั้งหมด</button>' +
+              '<button type="button" class="wt-link" data-action="printSelectNone">ล้างการเลือก</button>' +
+            "</div>" +
+            '<div id="printEntriesChecklistWrap">' + renderPrintChecklistHtml(printEntries) + "</div>" +
+          "</div>" +
+          '<div class="wt-error" id="printFormError"></div>' +
           '<button class="wt-submit" type="button" data-action="generatePrint">🖨 สร้าง &amp; พิมพ์รายงาน</button>' +
           '<button class="wt-cancel-link" type="button" data-action="closePrintModal" style="display:block;text-align:center;width:100%;margin-top:10px;">ยกเลิก</button>' +
         "</div>" +
@@ -893,7 +941,19 @@
       state.settings.methods.map(function (m) { return '<option value="' + esc(m) + '">' + esc(m) + "</option>"; }).join("");
     var total = selectedEntries.reduce(function (s, e) { return s + e.totalAmount; }, 0);
     var unitOptionsList = state.settings.units || [];
-    var itemsHtml = selectedEntries.map(function (e) {
+    var qtyItemsHtml = selectedEntries.map(function (e) {
+      return '<div style="padding:10px 0;border-bottom:1px solid var(--border);">' +
+        '<div style="font-size:13.5px;margin-bottom:6px;">' + esc(e.productName) +
+          '<span class="wt-prod-code wt-mono" style="margin-left:6px;">คงเหลือ ' + fmtNum(e.quantity) + " " + esc(e.unit) + " · " + fmtBaht(e.totalAmount) + " บ.</span>" +
+        "</div>" +
+        '<div>' +
+          '<label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;">จำนวนที่เบิกออกจากคลัง (สูงสุด ' + fmtNum(e.quantity) + " " + esc(e.unit) + ")</label>" +
+          '<input type="number" step="any" min="0" max="' + e.quantity + '" value="' + e.quantity + '" class="wt-bulk-withdraw-qty" data-id="' + esc(e.id) + '" data-max="' + e.quantity + '" style="width:100%;background:var(--surface-2);border:1.5px solid var(--border);color:var(--text);border-radius:var(--r-sm);padding:8px 10px;font-size:14px;font-family:\'Prompt\',sans-serif;">' +
+          '<div class="wt-hint" style="margin-top:4px;">ถ้ากรอกน้อยกว่าจำนวนคงเหลือ ส่วนที่เหลือจะยังอยู่ในคลังเป็นรายการแยก</div>' +
+        "</div>" +
+      "</div>";
+    }).join("");
+    var saleItemsHtml = selectedEntries.map(function (e) {
       var unitOptions = unitOptionsList.map(function (u) {
         return '<option value="' + esc(u) + '"' + (u === e.unit ? " selected" : "") + ">" + esc(u) + "</option>";
       }).join("");
@@ -932,9 +992,13 @@
           '<div class="wt-field"><label>วันที่เบิก</label><input type="date" id="bulkWithdrawDateField" value="' + todayStr() + '" max="' + todayStr() + '"></div>' +
           '<div class="wt-field"><label>เลขที่เอกสาร</label><input id="bulkWithdrawDocNumberField" value="' + esc(buildDocNumber(todayStr())) + '"></div>' +
           '<div class="wt-field"><label>หมายเหตุการเบิก (ถ้ามี, ใช้กับทุกรายการ)</label><textarea rows="2" id="bulkWithdrawNoteField" placeholder="เช่น เบิกไปทิ้งที่บ่อขยะกลาง / ส่งมอบให้ผู้รับซื้อ"></textarea></div>' +
+          '<div class="wt-field">' +
+            "<label>จำนวนที่เบิกออกจากคลังของแต่ละรายการ</label>" +
+            qtyItemsHtml +
+          "</div>" +
           '<div class="wt-field" id="bulkSalePriceSection" style="display:none;">' +
             "<label>จำนวนที่ขาย หน่วยที่ขาย และจำนวนเงินที่ขายได้จริงของแต่ละรายการ</label>" +
-            itemsHtml +
+            saleItemsHtml +
           "</div>" +
           '<div class="wt-error" id="bulkWithdrawFormError"></div>' +
           '<button class="wt-submit" type="button" data-action="confirmBulkWithdraw">✔ ยืนยัน &amp; สร้างเอกสารเบิก ' + selectedEntries.length + " รายการ</button>" +
@@ -992,16 +1056,61 @@
     var withdrawnNote = noteField ? noteField.value.trim() : "";
     var docNumber = (docField && docField.value.trim()) || buildDocNumber(withdrawnAt);
 
+    // ---- read & validate the per-entry "จำนวนที่เบิก" (withdraw quantity) ----
+    // Lets someone withdraw only part of an entry's quantity — e.g. a logged
+    // waste entry of 4 units where only 2 are actually being taken out now —
+    // instead of always moving the entry's full quantity to "withdrawn".
+    var withdrawQuantities = {};
+    var qtyError = "";
+    Array.prototype.forEach.call(document.querySelectorAll(".wt-bulk-withdraw-qty"), function (input) {
+      var id = input.getAttribute("data-id");
+      var max = parseFloat(input.getAttribute("data-max")) || 0;
+      var raw = input.value.trim();
+      var v = raw === "" ? NaN : parseFloat(raw);
+      if (isNaN(v) || v <= 0) qtyError = "กรุณาระบุจำนวนที่เบิกให้มากกว่า 0 ทุกรายการ";
+      else if (v > max + 1e-9) qtyError = "จำนวนที่เบิกต้องไม่เกินจำนวนคงเหลือของแต่ละรายการ";
+      withdrawQuantities[id] = v;
+    });
+    if (qtyError) return showBulkWithdrawFormError(qtyError);
+
+    var printEntries = [];
     selectedEntries.forEach(function (entry) {
-      entry.stockStatus = "withdrawn";
-      entry.withdrawnAt = withdrawnAt;
-      entry.withdrawnNote = withdrawnNote;
-      entry.method = method;
-      entry.salePrice = isSaleMethod(method) ? (salePrices[entry.id] != null ? salePrices[entry.id] : 0) : null;
-      entry.saleQuantity = isSaleMethod(method) ? (saleQuantities[entry.id] != null ? saleQuantities[entry.id] : null) : null;
-      entry.saleUnit = isSaleMethod(method) ? (saleUnits[entry.id] || entry.unit) : null;
-      entry.docNumber = docNumber;
-      persistEntry(entry).catch(function (err) { console.error(err); });
+      var withdrawQty = withdrawQuantities[entry.id];
+      var isPartial = withdrawQty < entry.quantity - 1e-9;
+      var withdrawnPart;
+
+      if (isPartial) {
+        // Split: shrink the original entry down to what stays in stock, and
+        // create a brand-new entry to represent the portion being withdrawn.
+        withdrawnPart = {
+          id: uid(),
+          date: entry.date, productId: entry.productId, productName: entry.productName, productCode: entry.productCode,
+          type: entry.type, quantity: withdrawQty, unit: entry.unit, unitPrice: entry.unitPrice,
+          totalAmount: withdrawQty * entry.unitPrice,
+          line: entry.line, note: entry.note, rootCause: entry.rootCause,
+          location: entry.location,
+          photos: (entry.photos || []).slice(),
+          createdAt: Date.now()
+        };
+        entry.quantity = entry.quantity - withdrawQty;
+        entry.totalAmount = entry.quantity * entry.unitPrice;
+        state.entries.push(withdrawnPart);
+        persistEntry(entry).catch(function (err) { console.error(err); });
+      } else {
+        // Full withdrawal — same as before, the entry itself becomes "withdrawn".
+        withdrawnPart = entry;
+      }
+
+      withdrawnPart.stockStatus = "withdrawn";
+      withdrawnPart.withdrawnAt = withdrawnAt;
+      withdrawnPart.withdrawnNote = withdrawnNote;
+      withdrawnPart.method = method;
+      withdrawnPart.salePrice = isSaleMethod(method) ? (salePrices[entry.id] != null ? salePrices[entry.id] : 0) : null;
+      withdrawnPart.saleQuantity = isSaleMethod(method) ? (saleQuantities[entry.id] != null ? saleQuantities[entry.id] : null) : null;
+      withdrawnPart.saleUnit = isSaleMethod(method) ? (saleUnits[entry.id] || entry.unit) : null;
+      withdrawnPart.docNumber = docNumber;
+      printEntries.push(withdrawnPart);
+      persistEntry(withdrawnPart).catch(function (err) { console.error(err); });
     });
 
     state.bulkWithdrawOpen = false;
@@ -1009,7 +1118,9 @@
     render();
     // Pop the combined document immediately — no separate trip to the history
     // tab needed to compile what was just withdrawn into one printable doc.
-    buildAndOpenHistoryBatchPrint(selectedEntries, docNumber);
+    // Uses printEntries (the withdrawn portions) rather than selectedEntries,
+    // since a partially-withdrawn entry's original object stays in stock.
+    buildAndOpenHistoryBatchPrint(printEntries, docNumber);
   }
 
   function renderDeleteConfirmModal() {
@@ -3216,6 +3327,12 @@
       case "closePrintModal": if (e.target === el) { state.printModalOpen = false; render(); } break;
       case "generatePrint": handleGeneratePrint(); break;
       case "printDashboard": buildAndOpenDashboardPrint(state.rangeStart, state.rangeEnd); break;
+      case "printSelectAll":
+        Array.prototype.forEach.call(document.querySelectorAll(".wt-print-entry-check"), function (cb) { cb.checked = true; });
+        break;
+      case "printSelectNone":
+        Array.prototype.forEach.call(document.querySelectorAll(".wt-print-entry-check"), function (cb) { cb.checked = false; });
+        break;
     }
   });
 
@@ -3249,7 +3366,9 @@
     else if (e.target.id === "printStartDate") {
       var docField = document.getElementById("printDocNumber");
       if (docField) docField.value = buildDocNumber(e.target.value);
+      refreshPrintChecklist();
     }
+    else if (e.target.id === "printEndDate") { refreshPrintChecklist(); }
   });
 
   document.getElementById("app").addEventListener("input", function (e) {
@@ -3310,9 +3429,19 @@
     var start = document.getElementById("printStartDate").value;
     var end = document.getElementById("printEndDate").value;
     var docNumber = document.getElementById("printDocNumber").value.trim();
-    if (!start || !end) { alert("กรุณาระบุช่วงวันที่"); return; }
-    if (start > end) { alert("วันที่เริ่มต้องไม่มากกว่าวันที่สิ้นสุด"); return; }
-    buildAndOpenPrintWindow(start, end, docNumber || "-");
+    var errEl = document.getElementById("printFormError");
+    if (errEl) errEl.textContent = "";
+    if (!start || !end) { if (errEl) errEl.textContent = "กรุณาระบุช่วงวันที่"; return; }
+    if (start > end) { if (errEl) errEl.textContent = "วันที่เริ่มต้องไม่มากกว่าวันที่สิ้นสุด"; return; }
+
+    var selectedIds = {};
+    var anyChecked = false;
+    Array.prototype.forEach.call(document.querySelectorAll(".wt-print-entry-check"), function (cb) {
+      if (cb.checked) { selectedIds[cb.getAttribute("data-id")] = true; anyChecked = true; }
+    });
+    if (!anyChecked) { if (errEl) errEl.textContent = "กรุณาติ๊กเลือกอย่างน้อย 1 รายการ"; return; }
+
+    buildAndOpenPrintWindow(start, end, docNumber || "-", selectedIds);
     state.printModalOpen = false;
     render();
   }
@@ -3372,10 +3501,10 @@
     );
   }
 
-  function buildAndOpenPrintWindow(start, end, docNumber) {
+  function buildAndOpenPrintWindow(start, end, docNumber, selectedIds) {
     var c = state.settings.company || {};
     var rows = state.entries
-      .filter(function (e) { return e.date >= start && e.date <= end; })
+      .filter(function (e) { return e.date >= start && e.date <= end && (!selectedIds || selectedIds[e.id]); })
       .sort(function (a, b) { return (a.date + a.createdAt).localeCompare(b.date + b.createdAt); });
     var total = rows.reduce(function (s, e) { return s + e.totalAmount; }, 0);
 
@@ -3464,7 +3593,7 @@
       var itemLine = esc(e.productName) +
         (e.productCode ? ' <span class="pr-sub">(' + esc(e.productCode) + ")</span>" : "");
       var saleQtyCell = e.saleQuantity != null ? (fmtNum(e.saleQuantity) + " " + esc(e.saleUnit || e.unit)) : '<span class="pr-sub">–</span>';
-      var saleCell = e.salePrice != null ? fmtBaht(e.salePrice) : '<span class="pr-sub">–</span>';
+      var saleCell = e.salePrice != null ? fmtBahtAlways(e.salePrice) : '<span class="pr-sub">–</span>';
       return (
         "<tr>" +
         '<td class="pr-c">' + (i + 1) + "</td>" +
@@ -3496,7 +3625,7 @@
         "<th style=\"width:10%;\">วันที่เบิก</th><th style=\"width:11%;\">จำนวนที่ขาย</th><th style=\"width:12%;\">จำนวนเงินที่ขายได้จริง (บาท)</th>" +
       "</tr></thead><tbody>" +
         bodyRows +
-        '<tr class="pr-total-row"><td colspan="4" class="pr-r">รวมทั้งสิ้น</td><td class="pr-r">' + fmtBaht(totalWaste) + "</td><td></td><td></td><td></td><td class=\"pr-r\">" + fmtBaht(totalSale) + "</td></tr>" +
+        '<tr class="pr-total-row"><td colspan="4" class="pr-r">รวมทั้งสิ้น</td><td class="pr-r">' + fmtBaht(totalWaste) + "</td><td></td><td></td><td></td><td class=\"pr-r\">" + fmtBahtAlways(totalSale) + "</td></tr>" +
       "</tbody></table>" +
 
       '<div class="pr-notes"><div class="lbl">บันทึกข้อความ</div>' +
