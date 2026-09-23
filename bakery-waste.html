@@ -3477,6 +3477,7 @@
       ".pr-notes { margin-bottom: 26px; }" +
       ".pr-notes .lbl { font-weight: 600; margin-bottom: 8px; }" +
       ".pr-dotted { border-bottom: 1px dotted #333; height: 20px; }" +
+      ".pr-note-text { border-bottom: 1px solid #333; min-height: 20px; padding-bottom: 4px; white-space: pre-wrap; word-break: break-word; font-size: 13px; }" +
       ".pr-sign-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 34px 26px; margin-top: 10px; }" +
       ".pr-sign { text-align: center; font-size: 12px; }" +
       ".pr-sign .line { border-bottom: 1px dotted #333; height: 30px; margin-bottom: 6px; }" +
@@ -3592,11 +3593,18 @@
     var rows = entries.slice().sort(function (a, b) { return String((a.withdrawnAt || "") + a.createdAt).localeCompare(String((b.withdrawnAt || "") + b.createdAt)); });
     var totalWaste = rows.reduce(function (s, e) { return s + e.totalAmount; }, 0);
     var totalSale = rows.reduce(function (s, e) { return s + (e.salePrice != null ? e.salePrice : 0); }, 0);
+    // The bulk-withdraw form applies one "หมายเหตุการเบิก" note to every entry
+    // in the batch, so pick up whichever row has it recorded.
+    var withdrawnNoteText = "";
+    for (var wi = 0; wi < rows.length; wi++) {
+      if (rows[wi].withdrawnNote) { withdrawnNoteText = rows[wi].withdrawnNote; break; }
+    }
 
     var runNumbers = computeEntryRunNumbers();
     var bodyRows = rows.map(function (e, i) {
       var itemLine = esc(e.productName) +
-        (e.productCode ? ' <span class="pr-sub">(' + esc(e.productCode) + ")</span>" : "");
+        (e.productCode ? ' <span class="pr-sub">(' + esc(e.productCode) + ")</span>" : "") +
+        (e.note ? '<div class="pr-sub">หมายเหตุ: ' + esc(e.note) + "</div>" : "");
       var saleQtyCell = e.saleQuantity != null ? (fmtNum(e.saleQuantity) + " " + esc(e.saleUnit || e.unit)) : '<span class="pr-sub">–</span>';
       var saleCell = e.salePrice != null ? fmtBahtAlways(e.salePrice) : '<span class="pr-sub">–</span>';
       return (
@@ -3633,8 +3641,10 @@
         '<tr class="pr-total-row"><td colspan="4" class="pr-r">รวมทั้งสิ้น</td><td class="pr-r">' + fmtBaht(totalWaste) + "</td><td></td><td></td><td></td><td class=\"pr-r\">" + fmtBahtAlways(totalSale) + "</td></tr>" +
       "</tbody></table>" +
 
-      '<div class="pr-notes"><div class="lbl">บันทึกข้อความ</div>' +
-        '<div class="pr-dotted"></div><div class="pr-dotted"></div><div class="pr-dotted"></div>' +
+      '<div class="pr-notes"><div class="lbl">บันทึกข้อความ (หมายเหตุการเบิก)</div>' +
+        (withdrawnNoteText
+          ? '<div class="pr-note-text">' + esc(withdrawnNoteText).replace(/\n/g, "<br>") + "</div>"
+          : '<div class="pr-dotted"></div><div class="pr-dotted"></div><div class="pr-dotted"></div>') +
       "</div>" +
 
       '<div class="pr-sign-grid">' +
