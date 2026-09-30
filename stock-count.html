@@ -1175,7 +1175,19 @@ async function saveReasonList(){ await sSet('reason_list', REASON_LIST, true); }
 // ส่วนตำแหน่ง/LOT ที่ผิดจริงจะไปแก้ไขข้อมูลภายหลัง (ผ่านการอนุมัติ exception) ไม่ใช่ตัวชี้วัดความถูกต้องของยอดนับ
 // คืนค่า array ใหม่ (ไม่แก้ไขของเดิม) พร้อมฟิลด์เพิ่ม: effQty (ยอดนับรวมหลังบวก exception), effDiff, effStatus, exceptionQty (ยอดที่มาจาก exception)
 function applyExceptionMatches(detail, exceptions){
+  // รายการ "พบสินค้า/LOT ใหม่" (type==='new_item') ไม่มีแถวต้นทางในรอบนับ จึงแทรกเป็นแถวเสมือน (System Qty = 0) เพื่อให้ยอดที่พบแสดงในจำนวน Count
+  const newRows = (exceptions||[]).filter(e=>e.type==='new_item').map((e,idx)=>({
+    id: 'new_'+(e.id||idx), code:e.code, name:e.name||e.code, cat:e.cat||'', unit:e.unit||'',
+    loc:e.foundLoc, exp:e.foundExp||null, et:!!e.foundExp, dte:null, lotRaw:'',
+    systemQty:0, unitCost:0, stockValue:0,
+    countQty1:+e.foundQty||0, countQty2:null, finalQty:+e.foundQty||0, diff:+e.foundQty||0,
+    status:'mismatch', reason:e.note||'พบสินค้าใหม่', countedBy:e.reportedBy||null, countedAt:e.reportedAt||null,
+    isNewFound:true
+  }));
+  const base = (detail||[]).filter(i=>!i.isNewFound);
+  detail = base.concat(newRows);
   return detail.map(i=>{
+    if(i.isNewFound) return {...i, effQty:i.finalQty, effDiff:i.finalQty, effStatus:'mismatch', exceptionQty:0};
     if(i.status==='uncounted') return {...i, effQty:null, effDiff:null, effStatus:'uncounted', exceptionQty:0};
     const extra = (exceptions||[])
       .filter(e=> e.code===i.code && e.origLoc===i.loc && e.origExp===i.exp)
@@ -2482,10 +2494,19 @@ async function renderReview(container){
     container.appendChild(el('div','footer-note','ยังไม่มีรายงานพบสินค้าผิดตำแหน่ง/ผิด LOT ในรอบนี้'));
   } else {
     const ewrap = el('div','table-wrap'); const et2 = el('table');
-    et2.innerHTML = `<thead><tr><th>ประเภท</th><th>Product</th><th>ชื่อสินค้า</th><th>ตำแหน่ง/LOT เดิม</th><th>ที่เจอจริง</th><th class="num">จำนวน</th><th>แจ้งโดย</th><th>สถานะ</th><th>การดำเนินการ</th></tr></thead>`;
+    if(!getSort('exceptions').key){ const _s=getSort('exceptions'); _s.key='code'; _s.dir=1; } // ค่าเริ่มต้น: เรียงตาม Product
+    et2.innerHTML = `<thead><tr>${sortableTh('ประเภท','type','exceptions')}${sortableTh('Product','code','exceptions')}${sortableTh('ชื่อสินค้า','name','exceptions')}<th>ตำแหน่ง/LOT เดิม</th>${sortableTh('ที่เจอจริง','foundLoc','exceptions')}${sortableTh('จำนวน','foundQty','exceptions',true)}<th>แจ้งโดย</th>${sortableTh('สถานะ','status','exceptions')}<th>การดำเนินการ</th></tr></thead>`;
+    wireSortableHeaders(et2, render);
     const etb = el('tbody');
     const allLocs = [...new Set(BASE.map(i=>i.loc))].sort();
-    exceptions.forEach(exc=>{
+    // เรียงตามคอลัมน์ที่เลือก (ค่าเริ่มต้น Product) — ถ้าค่าเท่ากันเรียงต่อด้วยรหัส, ตำแหน่ง, วันหมดอายุ
+    const _sk = getSort('exceptions'), _cmp=(x,y)=>String(x??'').localeCompare(String(y??''),undefined,{numeric:true,sensitivity:'base'});
+    exceptions.slice().sort((a,b)=>{
+      let r = 0;
+      if(_sk.key==='foundQty') r = ((+a.foundQty||0)-(+b.foundQty||0))*_sk.dir;
+      else if(_sk.key) r = _cmp(a[_sk.key],b[_sk.key])*_sk.dir;
+      return r || _cmp(a.code,b.code) || _cmp(a.foundLoc,b.foundLoc) || _cmp(a.foundExp,b.foundExp);
+    }).forEach(exc=>{
       const tr = el('tr');
       const typeLabel = exc.type==='location_mismatch' ? '📍 ผิดตำแหน่ง' : (exc.type==='new_item' ? '🆕 พบสินค้าใหม่' : '🏷️ ผิด LOT');
       const origStr = `${exc.origLoc}${exc.origExp?' / '+fmtDateTH(exc.origExp):''}`;
