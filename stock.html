@@ -354,6 +354,26 @@
   }
   .chip.in { background: var(--mint-bg); color: var(--mint-text); }
   .chip.out { background: var(--coral-bg); color: var(--coral-text); }
+  .chip.adjust { background: var(--yellow-bg); color: var(--yellow-text); }
+
+  /* ===== หน้านับสต็อก ===== */
+  .count-meta { display: grid; grid-template-columns: 180px 1fr 1.4fr; gap: 12px; margin-bottom: 14px; }
+  @media (max-width: 720px) { .count-meta { grid-template-columns: 1fr; } }
+  .count-meta .field { margin-bottom: 0; }
+  .count-meta .field input { width: 100%; }
+  .count-summary { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .count-pill { background: var(--surface-soft); border-radius: 12px; padding: 8px 14px; font-size: 12.5px; color: var(--ink-light); font-weight: 600; }
+  .count-pill b { font-family: var(--font-display); font-size: 15px; color: var(--ink); margin-left: 4px; }
+  .count-pill.up b { color: var(--mint-text); } .count-pill.down b { color: var(--coral-text); }
+  .count-input { width: 100px; text-align: right; border: 1.5px solid var(--line); border-radius: 10px; padding: 7px 10px; font-size: 14px; font-family: var(--font-display); background: #fff; color: var(--ink); }
+  .count-input:focus { outline: none; border-color: var(--purple); box-shadow: 0 0 0 2px var(--purple-bg); }
+  .count-diff { font-family: var(--font-display); font-weight: 700; white-space: nowrap; }
+  .count-diff.up { color: var(--mint-text); } .count-diff.down { color: var(--coral-text); } .count-diff.zero { color: var(--mint-text); } .count-diff.none { color: var(--ink-light); font-weight: 400; }
+  .count-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; margin-top: 16px; }
+  .count-history details { background: var(--surface-soft); border-radius: 14px; padding: 12px 16px; margin-bottom: 10px; }
+  .count-history summary { cursor: pointer; font-size: 13.5px; font-weight: 600; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .count-history .cl-row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .count-history .cl-row:last-child { border-bottom: none; }
 
   .recent-list { display: flex; flex-direction: column; gap: 8px; }
   .recent-row {
@@ -438,6 +458,13 @@
     execPreparedBy: '',
     editingId: null,
     editingTxId: null,
+    counts: [],
+    countDate: todayStr(),
+    countedBy: '',
+    countNote: '',
+    countSearch: '',
+    countFilter: 'all',
+    countInputs: {},
     configured: false,
     showImport: false,
     toast: null,
@@ -470,6 +497,7 @@
   function fmtMoney(n){
     return Number(n||0).toLocaleString('th-TH', {minimumFractionDigits:0, maximumFractionDigits:2});
   }
+  function txTypeLabel(t){ return t.adjust ? 'ปรับยอดนับ' : (t.type === 'in' ? 'รับเข้า' : 'ตัดออก'); }
   function itemById(id){ return state.items.find(i => i.id === id); }
   function itemName(id){ const it = itemById(id); return it ? it.name : '(ถูกลบแล้ว)'; }
   function itemUnit(id){ const it = itemById(id); return it ? it.unit : ''; }
@@ -489,6 +517,7 @@
       {id: uid('tx'), itemId: state.items[2].id, type:'out', qty:2, date: now, note:'เบิกใช้แผนกบัญชี', requester:'สมชาย (บัญชี)'},
     ];
     state.requesters = [{id: uid('req'), name:'สมชาย (บัญชี)'}];
+    state.counts = [];
   }
 
   function ensureRequestersIncludeHistory(){
@@ -534,6 +563,7 @@
         state.items = (data.items || []).map(i => ({price:0, code:'', image:'', ...i}));
         state.transactions = data.transactions || [];
         state.requesters = data.requesters || [];
+        state.counts = data.counts || [];
         ensureRequestersIncludeHistory();
       } else {
         seedDefault();
@@ -555,6 +585,7 @@
       items: state.items,
       transactions: state.transactions,
       requesters: state.requesters,
+      counts: state.counts,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
   }
@@ -740,6 +771,7 @@
     state.items = parsed.items.map(i => ({price:0, code:'', image:'', ...i}));
     state.transactions = parsed.transactions || [];
     state.requesters = parsed.requesters || [];
+    state.counts = parsed.counts || [];
     ensureRequestersIncludeHistory();
     state.showImport = false;
     try { await saveData(); showToast('นำเข้าข้อมูล ' + state.items.length + ' รายการสำเร็จ! บันทึกขึ้น Firebase แล้ว'); }
@@ -1017,7 +1049,7 @@
     const q = (search || '').trim().toLowerCase();
     const groups = {};
     state.transactions.forEach(t => {
-      if (t.type !== 'out') return;
+      if (t.type !== 'out' || t.adjust) return;
       if (!inRange(t.date, from, to)) return;
       const name = (t.requester || '').trim() || 'ไม่ระบุ';
       const key = name.toLowerCase();
@@ -1447,6 +1479,246 @@
 
 
 
+
+  // ===================== นับสต็อก =====================
+  function parseCountValue(v){
+    if (v === undefined || v === null) return null;
+    const t = String(v).trim();
+    if (t === '') return null;
+    const n = Number(t);
+    if (!isFinite(n) || n < 0 || Math.floor(n) !== n) return NaN;
+    return n;
+  }
+
+  function countStats(){
+    let counted = 0, withDiff = 0, up = 0, down = 0, valueDiff = 0, invalid = 0;
+    state.items.forEach(it => {
+      const c = parseCountValue(state.countInputs[it.id]);
+      if (Number.isNaN(c)) { invalid++; return; }
+      if (c === null) return;
+      counted++;
+      const d = c - it.qty;
+      if (d !== 0) {
+        withDiff++;
+        if (d > 0) up += d; else down += -d;
+        valueDiff += d * (it.price || 0);
+      }
+    });
+    return { counted, withDiff, up, down, valueDiff, invalid, total: state.items.length };
+  }
+
+  function countSummaryHTML(){
+    const st = countStats();
+    return (
+      '<div class="count-pill">นับแล้ว<b>' + st.counted + ' / ' + st.total + '</b></div>' +
+      '<div class="count-pill">มีผลต่าง<b>' + st.withDiff + ' รายการ</b></div>' +
+      '<div class="count-pill up">เกิน<b>+' + st.up + '</b></div>' +
+      '<div class="count-pill down">ขาด<b>-' + st.down + '</b></div>' +
+      '<div class="count-pill ' + (st.valueDiff >= 0 ? 'up' : 'down') + '">มูลค่าผลต่างสุทธิ<b>' + (st.valueDiff >= 0 ? '+' : '-') + '฿' + fmtMoney(Math.abs(st.valueDiff)) + '</b></div>'
+    );
+  }
+
+  function countDiffCellHTML(it){
+    const raw = state.countInputs[it.id];
+    const c = parseCountValue(raw);
+    if (Number.isNaN(c)) return '<span class="count-diff down">ต้องเป็นจำนวนเต็ม ≥ 0</span>';
+    if (c === null) return '<span class="count-diff none">ยังไม่นับ</span>';
+    const d = c - it.qty;
+    if (d === 0) return '<span class="count-diff zero">✓ ตรงกัน</span>';
+    return '<span class="count-diff ' + (d > 0 ? 'up' : 'down') + '">' + (d > 0 ? '+' : '') + d + ' ' + escapeHtml(it.unit) + '</span>';
+  }
+
+  function computeCountItems(){
+    const q = (state.countSearch || '').trim().toLowerCase();
+    return state.items.filter(it => {
+      if (q && !((it.name || '') + ' ' + (it.code || '')).toLowerCase().includes(q)) return false;
+      const c = parseCountValue(state.countInputs[it.id]);
+      if (state.countFilter === 'uncounted') return c === null;
+      if (state.countFilter === 'diff') return c !== null && !Number.isNaN(c) && c !== it.qty;
+      return true;
+    });
+  }
+
+  function countRowsHTML(items){
+    if (items.length === 0) {
+      return '<tr><td colspan="7"><div class="empty-state">ไม่พบรายการที่ตรงกับเงื่อนไข</div></td></tr>';
+    }
+    return items.map(it => {
+      const raw = state.countInputs[it.id];
+      return (
+        '<tr data-count-row="' + it.id + '">' +
+          '<td><span class="item-code">' + escapeHtml(it.code || '—') + '</span></td>' +
+          '<td class="item-name">' + escapeHtml(it.name) + '</td>' +
+          '<td>' + escapeHtml(it.unit) + '</td>' +
+          '<td class="qty-val">' + it.qty + '</td>' +
+          '<td><input type="number" min="0" step="1" inputmode="numeric" class="count-input" data-count-input="' + it.id + '" placeholder="นับได้" value="' + escapeHtml(raw === undefined ? '' : raw) + '"/></td>' +
+          '<td data-count-diff="' + it.id + '">' + countDiffCellHTML(it) + '</td>' +
+          '<td><button type="button" class="icon-btn in" data-action="count-match" data-id="' + it.id + '" title="ใส่ยอดนับเท่ากับยอดในระบบ">ตรง</button></td>' +
+        '</tr>'
+      );
+    }).join('');
+  }
+
+  function countHistoryHTML(){
+    if (!state.counts.length) return '<div class="empty-state">ยังไม่มีประวัติการนับสต็อก</div>';
+    return state.counts.slice(0, 10).map(c => {
+      const lines = (c.lines || []).map(l =>
+        '<div class="cl-row"><span>' + escapeHtml(l.name) + ' <span class="item-code">' + escapeHtml(l.code || '') + '</span></span>' +
+        '<span>ระบบ ' + l.system + ' → นับได้ <b>' + l.counted + '</b> ' + escapeHtml(l.unit || '') +
+        ' (<span style="color:' + (l.diff > 0 ? 'var(--mint-text)' : 'var(--coral-text)') + ';font-weight:700;">' + (l.diff > 0 ? '+' : '') + l.diff + '</span>)</span></div>'
+      ).join('');
+      return (
+        '<details><summary>' +
+          '<span>' + fmtDate(c.date) + '</span>' +
+          '<span class="chip adjust">ผู้นับ: ' + escapeHtml(c.countedBy || '—') + '</span>' +
+          '<span style="color:var(--ink-light);font-weight:500;">นับ ' + (c.countedTotal || 0) + ' รายการ · ปรับยอด ' + (c.lines || []).length + ' รายการ' +
+          (c.note ? ' · ' + escapeHtml(c.note) : '') + '</span>' +
+        '</summary>' +
+        '<div style="margin-top:8px;">' + (lines || '<div style="color:var(--ink-light);font-size:13px;">ทุกรายการที่นับตรงกับยอดในระบบ ไม่มีการปรับยอด</div>') + '</div></details>'
+      );
+    }).join('');
+  }
+
+  function renderCount(){
+    const filterOpt = (v, label) => '<option value="' + v + '"' + (state.countFilter === v ? ' selected' : '') + '>' + label + '</option>';
+    return (
+      '<div class="sr-panel">' +
+        '<h2 class="panel-title">นับสต็อก / ปรับยอดตามที่นับได้จริง</h2>' +
+        '<div class="count-meta">' +
+          '<div class="field"><label>วันที่นับ</label><input type="date" data-role="count-date" value="' + escapeHtml(state.countDate) + '"/></div>' +
+          '<div class="field"><label>ผู้นับ</label><input type="text" data-role="count-by" placeholder="ชื่อผู้นับสต็อก" value="' + escapeHtml(state.countedBy) + '"/></div>' +
+          '<div class="field"><label>หมายเหตุ</label><input type="text" data-role="count-note" placeholder="เช่น นับสต็อกสิ้นเดือน" value="' + escapeHtml(state.countNote) + '"/></div>' +
+        '</div>' +
+        '<div class="toolbar-row">' +
+          '<div class="search-wrap"><input type="text" data-role="count-search" autocomplete="off" placeholder="ค้นหาชื่อหรือรหัสวัสดุ..." value="' + escapeHtml(state.countSearch) + '"/></div>' +
+          '<div class="field" style="margin:0;"><select data-role="count-filter">' +
+            filterOpt('all', 'แสดงทั้งหมด') + filterOpt('uncounted', 'เฉพาะที่ยังไม่นับ') + filterOpt('diff', 'เฉพาะที่มีผลต่าง') +
+          '</select></div>' +
+        '</div>' +
+        '<div class="count-summary" data-role="count-summary">' + countSummaryHTML() + '</div>' +
+        '<div class="sr-table-wrap"><table class="sr-table"><thead><tr>' +
+          '<th>รหัส</th><th>รายการ</th><th>หน่วย</th><th>ยอดในระบบ</th><th>ยอดที่นับได้จริง</th><th>ผลต่าง</th><th></th>' +
+        '</tr></thead><tbody data-role="count-tbody">' + countRowsHTML(computeCountItems()) + '</tbody></table></div>' +
+        '<div style="font-size:12px;color:var(--ink-light);margin-top:10px;line-height:1.7;">' +
+          'เว้นช่องว่าง = ยังไม่นับ (ระบบจะไม่ปรับยอดรายการนั้น) · กด Enter เพื่อไปช่องถัดไป · ' +
+          'เมื่อกด "ปรับสต็อก" ยอดคงเหลือจะถูกตั้งเป็นยอดที่นับได้ และบันทึกผลต่างเป็นรายการ "ปรับยอดนับ" ในประวัติ' +
+        '</div>' +
+        '<div class="count-actions">' +
+          '<button type="button" class="btn" data-action="count-clear">ล้างค่าที่กรอก</button>' +
+          '<button type="button" class="btn btn-primary" data-action="count-apply">✅ ปรับสต็อกตามยอดที่นับได้</button>' +
+        '</div>' +
+        '<h2 class="panel-title" style="margin-top:28px;">ประวัติการนับสต็อก</h2>' +
+        '<div class="count-history">' + countHistoryHTML() + '</div>' +
+      '</div>'
+    );
+  }
+
+  async function applyCount(){
+    const date = state.countDate || todayStr();
+    const by = (state.countedBy || '').trim();
+    if (!by) { showToast('กรุณากรอกชื่อผู้นับ', 'warn'); return; }
+    const st = countStats();
+    if (st.invalid > 0) { showToast('มียอดนับที่ไม่ถูกต้อง (ต้องเป็นจำนวนเต็มตั้งแต่ 0)', 'warn'); return; }
+    if (st.counted === 0) { showToast('ยังไม่ได้กรอกยอดที่นับได้เลย', 'warn'); return; }
+
+    const lines = [];
+    state.items.forEach(it => {
+      const c = parseCountValue(state.countInputs[it.id]);
+      if (c === null || c === it.qty) return;
+      lines.push({ itemId: it.id, code: it.code || '', name: it.name, unit: it.unit, system: it.qty, counted: c, diff: c - it.qty });
+    });
+
+    const preview = lines.slice(0, 12).map(l => '• ' + l.name + ': ' + l.system + ' → ' + l.counted + ' (' + (l.diff > 0 ? '+' : '') + l.diff + ')').join('\n') +
+      (lines.length > 12 ? '\n… และอีก ' + (lines.length - 12) + ' รายการ' : '');
+    const msg = lines.length === 0
+      ? 'นับแล้ว ' + st.counted + ' รายการ ตรงกับยอดในระบบทั้งหมด\nบันทึกผลการนับ (ไม่มีการปรับยอด) ใช่หรือไม่?'
+      : 'นับแล้ว ' + st.counted + ' รายการ · ต้องปรับยอด ' + lines.length + ' รายการ\n\n' + preview +
+        '\n\nยืนยันปรับสต็อกให้เป็นยอดที่นับได้ใช่หรือไม่?';
+    if (!confirm(msg)) return;
+
+    const countId = uid('count');
+    lines.forEach(l => {
+      const item = itemById(l.itemId);
+      if (!item) return;
+      item.qty = l.counted;
+      state.transactions.unshift({
+        id: uid('tx'), itemId: l.itemId, type: l.diff > 0 ? 'in' : 'out', qty: Math.abs(l.diff),
+        date, requester: '', adjust: true, countId, countedBy: by,
+        note: 'ปรับยอดจากการนับสต็อก (ระบบ ' + l.system + ' → นับได้ ' + l.counted + ')' + (state.countNote.trim() ? ' · ' + state.countNote.trim() : '')
+      });
+    });
+    state.counts.unshift({ id: countId, date, countedBy: by, note: state.countNote.trim(), countedTotal: st.counted, createdAt: new Date().toISOString(), lines });
+    state.counts = state.counts.slice(0, 50);
+    state.countInputs = {};
+    state.countNote = '';
+    try { await saveData(); showToast(lines.length ? 'ปรับสต็อก ' + lines.length + ' รายการตามยอดที่นับได้แล้ว' : 'บันทึกผลการนับแล้ว (ยอดตรงทั้งหมด)'); }
+    catch(e){ showToast('บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง', 'warn'); }
+    render();
+  }
+
+  function wireCount(app){
+    if (state.tab !== 'count') return;
+    const tbody = app.querySelector('[data-role="count-tbody"]');
+    const summary = app.querySelector('[data-role="count-summary"]');
+    const refreshSummary = () => { if (summary) summary.innerHTML = countSummaryHTML(); };
+    const refreshRows = () => { if (tbody) { tbody.innerHTML = countRowsHTML(computeCountItems()); wireRows(); } };
+
+    function wireRows(){
+      const inputs = Array.from(tbody.querySelectorAll('[data-count-input]'));
+      inputs.forEach((inp, idx) => {
+        inp.addEventListener('input', () => {
+          const id = inp.getAttribute('data-count-input');
+          state.countInputs[id] = inp.value;
+          const it = itemById(id);
+          const cell = tbody.querySelector('[data-count-diff="' + id + '"]');
+          if (it && cell) cell.innerHTML = countDiffCellHTML(it);
+          refreshSummary();
+        });
+        inp.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            const next = inputs[idx + 1];
+            if (next) { next.focus(); next.select(); }
+          }
+        });
+        inp.addEventListener('wheel', () => inp.blur());
+      });
+      tbody.querySelectorAll('[data-action="count-match"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-id');
+          const it = itemById(id);
+          if (!it) return;
+          state.countInputs[id] = String(it.qty);
+          const inp = tbody.querySelector('[data-count-input="' + id + '"]');
+          const cell = tbody.querySelector('[data-count-diff="' + id + '"]');
+          if (inp) inp.value = it.qty;
+          if (cell) cell.innerHTML = countDiffCellHTML(it);
+          refreshSummary();
+        });
+      });
+    }
+    if (tbody) wireRows();
+
+    const dateIn = app.querySelector('[data-role="count-date"]');
+    if (dateIn) dateIn.addEventListener('change', () => { state.countDate = dateIn.value || todayStr(); });
+    const byIn = app.querySelector('[data-role="count-by"]');
+    if (byIn) byIn.addEventListener('input', () => { state.countedBy = byIn.value; });
+    const noteIn = app.querySelector('[data-role="count-note"]');
+    if (noteIn) noteIn.addEventListener('input', () => { state.countNote = noteIn.value; });
+    const searchIn = app.querySelector('[data-role="count-search"]');
+    if (searchIn) searchIn.addEventListener('input', () => { state.countSearch = searchIn.value; refreshRows(); });
+    const filterSel = app.querySelector('[data-role="count-filter"]');
+    if (filterSel) filterSel.addEventListener('change', () => { state.countFilter = filterSel.value; refreshRows(); });
+
+    const clearBtn = app.querySelector('[data-action="count-clear"]');
+    if (clearBtn) clearBtn.addEventListener('click', () => {
+      if (Object.keys(state.countInputs).length && !confirm('ล้างยอดที่กรอกไว้ทั้งหมด?')) return;
+      state.countInputs = {}; render();
+    });
+    const applyBtn = app.querySelector('[data-action="count-apply"]');
+    if (applyBtn) applyBtn.addEventListener('click', applyCount);
+  }
+
   function setTab(tab, presetItem){
     state.tab = tab;
     state.presetItem = presetItem || null;
@@ -1592,6 +1864,7 @@
       ['overview','ภาพรวมคงเหลือ'],
       ['receive','รับเข้า'],
       ['issue','ตัดออก'],
+      ['count','นับสต็อก'],
       ['history','ประวัติรายการ'],
       ['byRequester','สรุปการเบิกรายคน'],
       ['report','แดชบอร์ดรายงาน'],
@@ -1791,7 +2064,7 @@
 
   function renderMoveForm(type){
     const isIn = type === 'in';
-    const recent = state.transactions.filter(t => t.type === type).slice(0, 8);
+    const recent = state.transactions.filter(t => t.type === type && !t.adjust).slice(0, 8);
     const recentHTML = recent.length === 0
       ? '<div class="empty-state">ยังไม่มีรายการ' + (isIn?'รับเข้า':'ตัดออก') + '</div>'
       : '<div class="recent-list">' + recent.map(t =>
@@ -1854,7 +2127,7 @@
       if (!q) return true;
       const haystack = [
         itemName(t.itemId), itemCode(t.itemId), itemUnit(t.itemId),
-        t.requester || '', t.note || '', (t.type === 'in' ? 'รับเข้า' : 'ตัดออก')
+        t.requester || '', t.note || '', txTypeLabel(t)
       ].join(' ').toLowerCase();
       return haystack.includes(q);
     });
@@ -1904,14 +2177,14 @@
       return (
         '<tr>' +
           '<td>' + fmtDate(t.date) + '</td>' +
-          '<td><span class="chip ' + t.type + '">' + (t.type==='in'?'รับเข้า':'ตัดออก') + '</span></td>' +
+          '<td><span class="chip ' + (t.adjust ? 'adjust' : t.type) + '">' + txTypeLabel(t) + '</span></td>' +
           '<td><span class="item-code">' + escapeHtml(itemCode(t.itemId)) + '</span></td>' +
           '<td class="item-name">' + escapeHtml(itemName(t.itemId)) + '</td>' +
           '<td class="qty-val" style="color:' + (t.type==='in'?'var(--mint-text)':'var(--coral-text)') + ';">' + (t.type==='in'?'+':'-') + t.qty + ' ' + escapeHtml(itemUnit(t.itemId)) + '</td>' +
           '<td class="note-cell">' + escapeHtml(t.requester || '—') + '</td>' +
           '<td class="note-cell">' + escapeHtml(t.note || '—') + '</td>' +
           '<td><div class="row-actions">' +
-            '<button class="icon-btn edit" data-action="edit-tx" data-id="' + t.id + '" title="แก้ไขรายการ">แก้ไข</button>' +
+            (t.adjust ? '' : '<button class="icon-btn edit" data-action="edit-tx" data-id="' + t.id + '" title="แก้ไขรายการ">แก้ไข</button>') +
             '<button class="icon-btn del" data-action="delete-tx" data-id="' + t.id + '" title="ลบรายการ">ลบ</button>' +
           '</div></td>' +
         '</tr>'
@@ -1961,6 +2234,7 @@
     if (state.tab === 'overview') panel = renderOverview();
     else if (state.tab === 'receive') panel = renderMoveForm('in');
     else if (state.tab === 'issue') panel = renderMoveForm('out');
+    else if (state.tab === 'count') panel = renderCount();
     else if (state.tab === 'history') panel = renderHistory();
     else if (state.tab === 'byRequester') panel = renderRequesterSummary();
     else if (state.tab === 'report') panel = renderReport();
@@ -2227,6 +2501,7 @@
     if (refreshBtn) refreshBtn.addEventListener('click', refreshData);
 
     wireOverviewRows(app);
+    wireCount(app);
 
     const searchInput = app.querySelector('[data-role="overview-search"]');
     if (searchInput) {
