@@ -2237,6 +2237,138 @@ async function renderMobile(container){
   };
   if(locked){ newItemToggle.disabled = true; newItemForm.querySelectorAll('input,select,button').forEach(elm=>elm.disabled=true); }
 
+  // ---------------- Export Excel จากหน้านับสต็อก ----------------
+  // ดึงข้อมูลล่าสุดจาก cache ตอนกดปุ่ม (รวมยอดที่นับ/รายงานผิดตำแหน่ง/สินค้าพบใหม่) และใช้ตัวกรอง Location/ประเภท/สถานะด้านบนเหมือนหน้าจอ
+  const exportRow = el('div',''); exportRow.style.cssText='display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;';
+  const btnExportXlsx = el('button','btn btn-primary','📥 Export Excel');
+  const btnExportCsv = el('button','btn','CSV');
+  btnExportXlsx.type='button'; btnExportCsv.type='button';
+  const btnExportSku = el('button','btn btn-primary','📊 Export สรุปตามรหัส (Excel)');
+  btnExportSku.type='button';
+  exportRow.appendChild(btnExportSku); exportRow.appendChild(btnExportXlsx); exportRow.appendChild(btnExportCsv);
+  container.appendChild(exportRow);
+  function buildMobileExport(){
+    const raw = DETAIL_CACHE[ACTIVE_ROUND] || [];
+    const exc = EXC_CACHE[ACTIVE_ROUND] || [];
+    const excTypeTH = t => t==='location_mismatch' ? 'ผิดตำแหน่ง' : (t==='new_item' ? 'พบสินค้าใหม่' : 'ผิด LOT');
+    const excStatusTH = s => s==='pending' ? 'รอตรวจสอบ' : 'ดำเนินการแล้ว';
+    const rows = applyExceptionMatches(filterDetail(raw), exc)
+      .filter(i=>{
+        if(state.location && i.loc!==state.location) return false;
+        if(state.category && i.cat && i.cat!==state.category) return false;
+        return true;
+      });
+    const headers = ['ลำดับ','Product Code','ชื่อสินค้า','ประเภท','LOT','Location','หน่วย','System Qty','Count Qty (รวม exception)','Diff','สถานะ','เหตุผล','พบผิดตำแหน่ง/ผิด LOT','นับโดย','เวลา'];
+    const data = rows.map((i,idx)=>{
+      const mine = i.isNewFound ? [] : exc.filter(e=> e.code===i.code && e.origLoc===i.loc && e.origExp===i.exp);
+      const excText = mine.map(e=>{
+        const where = e.type==='location_mismatch' ? e.foundLoc : `${e.foundLoc} / ${e.foundExp?fmtDateTH(e.foundExp):'-'}`;
+        return `${excTypeTH(e.type)}: พบที่ ${where} จำนวน ${e.foundQty}`;
+      }).join(' | ');
+      return [
+        idx+1, i.code, i.name, i.cat||'', fmtLot(i), i.loc, i.unit||'', i.systemQty,
+        i.effQty==null?'':i.effQty, i.effDiff==null?'':i.effDiff,
+        statusLabelTH(i.effStatus||i.status), i.reason||'', excText, i.countedBy||'', i.countedAt||''
+      ];
+    });
+    // ชีตที่ 2: รายงานผิดตำแหน่ง/ผิด LOT/พบสินค้าใหม่ ทั้งหมดของรอบนี้ (ใช้ตัวกรอง Location ที่ตำแหน่งที่เจอหรือตำแหน่งเดิม)
+    const excFiltered = exc.filter(e=> !state.location || e.origLoc===state.location || e.foundLoc===state.location);
+    const excHeaders = ['ลำดับ','ประเภท','Product Code','ชื่อสินค้า','Location เดิม','LOT เดิม','Location ที่เจอ','LOT ที่เจอ','จำนวนที่เจอ','หน่วย','หมายเหตุ','สถานะ','การดำเนินการ','แจ้งโดย','เวลาที่แจ้ง'];
+    const excData = excFiltered.slice().sort((a,b)=> String(a.code).localeCompare(String(b.code),undefined,{numeric:true}))
+      .map((e,idx)=>[
+        idx+1, excTypeTH(e.type), e.code, e.name||'',
+        e.type==='new_item' ? '-' : e.origLoc, e.type==='new_item' ? '-' : (e.origExp?fmtDateTH(e.origExp):'-'),
+        e.foundLoc||'', e.foundExp?fmtDateTH(e.foundExp):'-', e.foundQty, e.unit||'', e.note||'',
+        excStatusTH(e.status), e.resolution||'', e.reportedBy||'', e.reportedAt||''
+      ]);
+    return {headers, data, excHeaders, excData, title:`StockCount_Mobile_${ACTIVE_ROUND}`};
+  }
+  btnExportXlsx.onclick = async ()=>{
+    if(!window.XLSX){ toast('ไลบรารี Excel ยังโหลดไม่เสร็จ ลองใหม่อีกครั้ง','error'); return; }
+    await loadDetail(ACTIVE_ROUND); await loadExceptions(ACTIVE_ROUND);
+    const {headers,data,excHeaders,excData,title} = buildMobileExport();
+    if(data.length===0 && excData.length===0){ toast('ไม่มีข้อมูลสำหรับ export','error'); return; }
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([headers, ...data]), 'Stock Count');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([excHeaders, ...excData]), 'ผิดตำแหน่ง-ผิด LOT');
+    XLSX.writeFile(wb, title+'.xlsx');
+    logAudit('Export Excel (หน้านับสต็อก)','-',title);
+    toast(`ดาวน์โหลด Excel แล้ว (${data.length} แถว + รายงานผิดปกติ ${excData.length} รายการ)`,'success');
+  };
+  btnExportCsv.onclick = async ()=>{
+    await loadDetail(ACTIVE_ROUND); await loadExceptions(ACTIVE_ROUND);
+    const {headers,data,title} = buildMobileExport();
+    if(data.length===0){ toast('ไม่มีข้อมูลสำหรับ export','error'); return; }
+    exportCSV(title+'.csv', headers, data);
+    logAudit('Export CSV (หน้านับสต็อก)','-',title);
+    toast('ดาวน์โหลด CSV แล้ว','success');
+  };
+
+  // ---------------- สรุปตามรหัสสินค้า: ในระบบรวมเท่าไร / นับจริงเจอกี่ LOT ที่ Location ไหน จำนวนเท่าไร ----------------
+  function buildSkuSummary(){
+    const raw = (DETAIL_CACHE[ACTIVE_ROUND] || []).filter(i=>!i.isNewFound);
+    const exc = EXC_CACHE[ACTIVE_ROUND] || [];
+    const rows = raw.filter(i=>{
+      if(state.location && i.loc!==state.location) return false;
+      if(state.category && i.cat!==state.category) return false;
+      return true;
+    });
+    const map = new Map();
+    const get = (code,name,unit,cat)=>{
+      if(!map.has(code)) map.set(code,{code,name:name||code,unit:unit||'',cat:cat||'',sysQty:0,sysParts:[],found:new Map(),rows:0,rowsCounted:0});
+      return map.get(code);
+    };
+    const addFound = (g, loc, lot, qty, tag)=>{
+      const k = loc+'|'+lot;
+      if(!g.found.has(k)) g.found.set(k,{loc,lot,qty:0,tags:new Set()});
+      const f = g.found.get(k); f.qty += qty; if(tag) f.tags.add(tag);
+    };
+    rows.forEach(i=>{
+      const g = get(i.code,i.name,i.unit,i.cat);
+      g.sysQty += (i.systemQty||0); g.rows++;
+      g.sysParts.push(`${fmtLot(i)} @ ${i.loc} = ${i.systemQty}`);
+      if(i.status!=='uncounted'){ g.rowsCounted++; addFound(g, i.loc, fmtLot(i), +i.finalQty||0, ''); }
+    });
+    exc.filter(e=> !state.location || e.origLoc===state.location || e.foundLoc===state.location).forEach(e=>{
+      const g = get(e.code,e.name,e.unit,e.cat);
+      const tag = e.type==='location_mismatch' ? 'ผิดตำแหน่ง' : (e.type==='new_item' ? 'พบใหม่' : 'ผิด LOT');
+      addFound(g, e.foundLoc||'-', e.foundExp?fmtDateTH(e.foundExp):'-', +e.foundQty||0, tag);
+    });
+    const headers = ['รหัสสินค้า','ชื่อสินค้า','หน่วย','System Qty รวม','Count Qty รวม','Diff','สถานะ','ในระบบมีที่ (LOT @ Location = จำนวน)','นับจริงเจอ: LOT','นับจริงเจอ: Location','นับจริงเจอ: จำนวน','หมายเหตุ'];
+    const out = [];
+    Array.from(map.values()).sort((a,b)=>String(a.code).localeCompare(String(b.code),undefined,{numeric:true})).forEach(g=>{
+      const list = Array.from(g.found.values()).filter(f=>f.qty>0 || f.tags.size>0);
+      const total = Array.from(g.found.values()).reduce((a,f)=>a+f.qty,0);
+      const full = g.rows>0 && g.rowsCounted===g.rows;
+      const diff = total - g.sysQty;
+      let st = g.rowsCounted===0 && list.length===0 ? 'uncounted' : (!full && g.rows>0 ? 'partial' : (diff===0?'matched':'mismatch'));
+      const sysText = g.sysParts.length ? g.sysParts.join(' | ') : '(ไม่มีในระบบ)';
+      const first = [g.code,g.name,g.unit,g.sysQty,(g.rowsCounted>0||list.length)?total:'',(full||g.rows===0)?diff:'',statusLabelTH(st),sysText];
+      if(list.length===0){
+        out.push(first.concat(['','','', g.rowsCounted===0?'ยังไม่ได้นับ':'นับแล้ว ไม่พบสินค้า (0)']));
+      } else {
+        list.forEach((f,idx)=>{
+          const tail = [f.lot,f.loc,f.qty,Array.from(f.tags).join(', ')];
+          out.push(idx===0 ? first.concat(tail) : [g.code,'','','','','','','' ].concat(tail));
+        });
+      }
+    });
+    return {headers, out, title:`StockCount_Summary_${ACTIVE_ROUND}`};
+  }
+  btnExportSku.onclick = async ()=>{
+    if(!window.XLSX){ toast('ไลบรารี Excel ยังโหลดไม่เสร็จ ลองใหม่อีกครั้ง','error'); return; }
+    await loadDetail(ACTIVE_ROUND); await loadExceptions(ACTIVE_ROUND);
+    const {headers,out,title} = buildSkuSummary();
+    if(out.length===0){ toast('ไม่มีข้อมูลสำหรับ export','error'); return; }
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...out]);
+    ws['!cols'] = [{wch:12},{wch:34},{wch:8},{wch:14},{wch:14},{wch:8},{wch:12},{wch:50},{wch:14},{wch:24},{wch:14},{wch:18}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'สรุปตามรหัส');
+    XLSX.writeFile(wb, title+'.xlsx');
+    logAudit('Export Excel สรุปตามรหัส (หน้านับสต็อก)','-',title);
+    toast('ดาวน์โหลดสรุปตามรหัสแล้ว','success');
+  };
+
   container.appendChild(resultsBox);
 
   let detail = await loadDetail(ACTIVE_ROUND);
