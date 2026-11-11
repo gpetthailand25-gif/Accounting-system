@@ -26,6 +26,7 @@
 .pi-file-link:hover{text-decoration:underline;}
 /* สำรอง: สีตราสัญลักษณ์ พ.ร.บ. ใช้เผื่อ style.css ยังไม่มีคลาส teal */
 .brand-mark.teal{background:#0f766e;color:#fff;font-size:11px;}
+.brand-mark.purple{background:#7c3aed;color:#fff;font-size:11px;}
 </style>
 </head>
 <body>
@@ -45,8 +46,10 @@ const POLICY_KEY_PREFIX = 'policy:';
 const KINDS = {
   factory: { label: 'ประกันโรงงาน', addLabel: 'เพิ่มโรงงาน', mark: 'ปก', markClass: 'amber', assetType: 'factory' },
   vehicle: { label: 'ประกันรถยนต์ (ภาคสมัครใจ)', addLabel: 'เพิ่มรถยนต์', mark: 'รถ', markClass: 'blue', assetType: 'vehicle' },
-  compulsory: { label: 'พ.ร.บ. รถยนต์', addLabel: null, mark: 'พรบ', markClass: 'teal', assetType: 'vehicle' }
+  compulsory: { label: 'พ.ร.บ. รถยนต์', addLabel: null, mark: 'พรบ', markClass: 'teal', assetType: 'vehicle' },
+  tax: { label: 'ภาษีรถยนต์', addLabel: null, mark: 'ภาษี', markClass: 'purple', assetType: 'vehicle' }
 };
+const TAX_CLASS = 'ภาษีรถยนต์';
 
 let assets = [];
 let policies = [];
@@ -102,7 +105,8 @@ function policyStatus(p){
 function policyMatchesKindFilter(p, kind){
   if(!kind) return true;
   if(kind === 'compulsory') return p.insClass === 'พ.ร.บ.';
-  if(kind === 'vehicle') return p.insClass !== 'พ.ร.บ.';
+  if(kind === 'tax') return p.insClass === TAX_CLASS;
+  if(kind === 'vehicle') return p.insClass !== 'พ.ร.บ.' && p.insClass !== TAX_CLASS;
   return true;
 }
 function latestPolicyFor(assetId, kind){
@@ -118,8 +122,13 @@ function assetOverallStatus(assetId, kind){
   if(statuses.includes('expiring')) return 'expiring';
   return 'active';
 }
-function statusPill(status){
-  const map = {
+function statusPill(status, kind){
+  const map = kind === 'tax' ? {
+    active: ['pill-ok','ต่อภาษีแล้ว'],
+    expiring: ['pill-warn','ใกล้ครบกำหนด'],
+    expired: ['pill-danger','ขาดต่อภาษี'],
+    none: ['pill-none','ไม่มีข้อมูลภาษี']
+  } : {
     active: ['pill-ok','ปกติ'],
     expiring: ['pill-warn','ใกล้หมดอายุ'],
     expired: ['pill-danger','หมดอายุ'],
@@ -330,6 +339,7 @@ function kindTabsHtml(){
     <button type="button" data-select-kind="factory" class="${active==='factory'?'active':''}">${KINDS.factory.label}</button>
     <button type="button" data-select-kind="vehicle" class="${active==='vehicle'?'active':''}">${KINDS.vehicle.label}</button>
     <button type="button" data-select-kind="compulsory" class="${active==='compulsory'?'active':''}">${KINDS.compulsory.label}</button>
+    <button type="button" data-select-kind="tax" class="${active==='tax'?'active':''}">${KINDS.tax.label}</button>
   </div>`;
 }
 
@@ -370,21 +380,22 @@ function dashboardHtml(){
         <div style="font-weight:500;">${escapeHtml(a.name)}</div>
         <div style="font-size:12px;color:var(--ink-soft);">${sub}</div>
       </td>
-      <td>${lp ? escapeHtml(lp.insurer) : '-'}</td>
+      <td>${lp ? escapeHtml(lp.insurer || '-') : '-'}</td>
       <td>${lp ? fmtDate(lp.endDate) : '-'}</td>
-      <td>${statusPill(status)}</td>
+      <td>${statusPill(status, kind)}</td>
     </tr>`;
   }).join('');
 
-  const nounSubject = (kind === 'vehicle' || kind === 'compulsory') ? 'รถยนต์' : 'โรงงาน';
+  const nounSubject = (kind === 'vehicle' || kind === 'compulsory' || kind === 'tax') ? 'รถยนต์' : 'โรงงาน';
+  const isTaxKind = kind === 'tax';
   const addBtnLabel = KINDS[kind].addLabel;
 
   return `
   <div class="grid-summary">
     <div class="metric"><div class="label">${nounSubject}ที่ลงทะเบียน</div><div class="value">${list0.length}</div></div>
-    <div class="metric"><div class="label">กรมธรรม์ที่ยังคุ้มครอง</div><div class="value">${activePolicies}</div></div>
-    <div class="metric warn"><div class="label">ใกล้หมดอายุ (30 วัน)</div><div class="value">${expiringSoon}</div></div>
-    <div class="metric danger"><div class="label">หมดอายุแล้ว</div><div class="value">${expired}</div></div>
+    <div class="metric"><div class="label">${isTaxKind?'ภาษีที่ยังไม่ขาด':'กรมธรรม์ที่ยังคุ้มครอง'}</div><div class="value">${activePolicies}</div></div>
+    <div class="metric warn"><div class="label">${isTaxKind?'ใกล้ครบกำหนด (30 วัน)':'ใกล้หมดอายุ (30 วัน)'}</div><div class="value">${expiringSoon}</div></div>
+    <div class="metric danger"><div class="label">${isTaxKind?'ขาดต่อภาษี':'หมดอายุแล้ว'}</div><div class="value">${expired}</div></div>
   </div>
 
   <div class="toolbar">
@@ -392,9 +403,9 @@ function dashboardHtml(){
     <select id="statusFilter">
       <option value="all" ${statusFilter==='all'?'selected':''}>สถานะทั้งหมด</option>
       <option value="active" ${statusFilter==='active'?'selected':''}>ปกติ</option>
-      <option value="expiring" ${statusFilter==='expiring'?'selected':''}>ใกล้หมดอายุ</option>
-      <option value="expired" ${statusFilter==='expired'?'selected':''}>หมดอายุ</option>
-      <option value="none" ${statusFilter==='none'?'selected':''}>ไม่มีประกัน</option>
+      <option value="expiring" ${statusFilter==='expiring'?'selected':''}>${isTaxKind?'ใกล้ครบกำหนด':'ใกล้หมดอายุ'}</option>
+      <option value="expired" ${statusFilter==='expired'?'selected':''}>${isTaxKind?'ขาดต่อภาษี':'หมดอายุ'}</option>
+      <option value="none" ${statusFilter==='none'?'selected':''}>${isTaxKind?'ไม่มีข้อมูลภาษี':'ไม่มีประกัน'}</option>
     </select>
     ${addBtnLabel ? `<button class="btn btn-primary" id="btnAddAsset">+ ${addBtnLabel}</button>` : ''}
   </div>
@@ -407,7 +418,7 @@ function dashboardHtml(){
       </div>
     ` : `
       <table>
-        <thead><tr><th>${nounSubject}</th><th>บริษัทประกัน</th><th>วันหมดอายุล่าสุด</th><th>สถานะ</th></tr></thead>
+        <thead><tr><th>${nounSubject}</th><th>${isTaxKind?'สถานที่ชำระ':'บริษัทประกัน'}</th><th>${isTaxKind?'วันครบกำหนดภาษีล่าสุด':'วันหมดอายุล่าสุด'}</th><th>สถานะ</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     `}
@@ -503,22 +514,26 @@ function assetDetailHtml(assetId){
 
   const policyItems = assetPolicies.length === 0 ? `
     <div class="empty" style="padding:30px 10px;">
-      <p>ยังไม่มีกรมธรรม์ประกันสำหรับรายการนี้</p>
+      <p>ยังไม่มีข้อมูลกรมธรรม์/ภาษีสำหรับรายการนี้</p>
     </div>
   ` : assetPolicies.map(p => {
     const st = policyStatus(p);
+    const isTaxRec = p.insClass === TAX_CLASS;
     return `
     <div class="policy-item">
       <div class="pi-main">
+        ${isTaxRec ? `
+        <p style="font-weight:500;">ภาษีรถยนต์ประจำปี${p.insurer ? ' · '+escapeHtml(p.insurer) : ''} · เลขที่ใบเสร็จ ${escapeHtml(p.policyNumber||'-')}</p>
+        <p class="sub">ชำระเมื่อ ${fmtDate(p.startDate)} · ครบกำหนด ${fmtDate(p.endDate)} · ค่าภาษี ${fmtMoney(p.premium)}</p>` : `
         <p style="font-weight:500;">${escapeHtml(p.insurer)} · เลขกรมธรรม์ ${escapeHtml(p.policyNumber||'-')} ${p.insClass ? '· ประเภท '+escapeHtml(p.insClass) : ''}</p>
-        <p class="sub">คุ้มครอง ${fmtDate(p.startDate)} — ${fmtDate(p.endDate)} · เบี้ยประกัน ${fmtMoney(p.premium)} ${p.coverAmount ? '· ทุนประกัน '+fmtMoney(p.coverAmount) : ''}</p>
+        <p class="sub">คุ้มครอง ${fmtDate(p.startDate)} — ${fmtDate(p.endDate)} · เบี้ยประกัน ${fmtMoney(p.premium)} ${p.coverAmount ? '· ทุนประกัน '+fmtMoney(p.coverAmount) : ''}</p>`}
         ${(p.docFiles && p.docFiles.length) ? `
         <div class="pi-files">
           ${p.docFiles.map(f => `<a href="${escapeAttr(f.dataUrl)}" download="${escapeAttr(f.name)}" class="pi-file-link">📎 ${escapeHtml(f.name)}</a>`).join('')}
         </div>` : (p.docRef ? `<p class="sub">เอกสารอ้างอิง: ${escapeHtml(p.docRef)}</p>` : '')}
       </div>
       <div style="display:flex;align-items:center;gap:10px;">
-        ${statusPill(st)}
+        ${statusPill(st, isTaxRec ? 'tax' : undefined)}
         <button class="btn-ghost" data-edit-policy="${p.id}">แก้ไข</button>
       </div>
     </div>`;
@@ -530,11 +545,11 @@ function assetDetailHtml(assetId){
     <div class="detail-head">
       <div>
         <h2>${escapeHtml(a.name)}</h2>
-        <p>${statusPill(assetOverallStatus(a.id))}</p>
+        <p>${statusPill(assetOverallStatus(a.id, kind === 'tax' ? 'tax' : undefined), kind === 'tax' ? 'tax' : undefined)}</p>
       </div>
       <div class="detail-actions">
         <button class="btn" data-edit-asset="${a.id}">แก้ไขข้อมูล</button>
-        <button class="btn btn-primary" data-add-policy="${a.id}">+ เพิ่มกรมธรรม์</button>
+        <button class="btn btn-primary" data-add-policy="${a.id}">${kind==='tax' ? '+ เพิ่มภาษีรถยนต์' : (kind==='compulsory' ? '+ เพิ่ม พ.ร.บ.' : '+ เพิ่มกรมธรรม์')}</button>
       </div>
     </div>
 
@@ -559,25 +574,32 @@ function policyFormHtml(assetId, policyId){
   const originKind = (view.params && view.params.kind) || assetType; // แท็บที่กดเข้ามา (ใช้ตอนย้อนกลับ)
   // ถือว่าเป็น พ.ร.บ. ถ้าเข้ามาจากแท็บ พ.ร.บ. โดยตรง หรือกำลังแก้ไขกรมธรรม์ที่เป็น พ.ร.บ. อยู่แล้ว
   const isCompulsory = originKind === 'compulsory' || editing?.insClass === 'พ.ร.บ.';
+  const isTax = originKind === 'tax' || editing?.insClass === TAX_CLASS;
   fileState = { kept: (editing?.docFiles || []).slice(), newFiles: [] };
 
   return `
   <div class="back-row"><button class="btn-ghost" data-nav="assetDetail" data-asset="${assetId}" data-kind="${originKind}">← กลับหน้ารายการ</button></div>
   <div class="card" style="max-width:560px;">
-    <h2 style="margin:0 0 4px;font-size:17px;">${editing ? 'แก้ไขกรมธรรม์' : (isCompulsory ? 'เพิ่ม พ.ร.บ. รถยนต์' : 'เพิ่มกรมธรรม์ประกัน')}</h2>
+    <h2 style="margin:0 0 4px;font-size:17px;">${editing ? (isTax ? 'แก้ไขข้อมูลภาษี' : 'แก้ไขกรมธรรม์') : (isTax ? 'เพิ่มภาษีรถยนต์' : (isCompulsory ? 'เพิ่ม พ.ร.บ. รถยนต์' : 'เพิ่มกรมธรรม์ประกัน'))}</h2>
     <p style="margin:0 0 18px;color:var(--ink-soft);font-size:13px;">สำหรับ ${escapeHtml(a.name)}</p>
 
     <form id="policyForm">
       <div class="form-grid">
         <div class="field full">
-          <label>บริษัทประกัน</label>
-          <input type="text" name="insurer" required placeholder="เช่น วิริยะประกันภัย" value="${escapeAttr(editing?.insurer||'')}">
+          <label>${isTax ? 'สถานที่ชำระ (ไม่บังคับ)' : 'บริษัทประกัน'}</label>
+          <input type="text" name="insurer" ${isTax ? '' : 'required'} placeholder="${isTax ? 'เช่น ขนส่งจังหวัด / ไปรษณีย์ / ออนไลน์' : 'เช่น วิริยะประกันภัย'}" value="${escapeAttr(editing?.insurer||'')}">
         </div>
         <div class="field">
-          <label>เลขที่กรมธรรม์</label>
-          <input type="text" name="policyNumber" placeholder="เลขที่กรมธรรม์" value="${escapeAttr(editing?.policyNumber||'')}">
+          <label>${isTax ? 'เลขที่ใบเสร็จ / ใบแทนภาษี' : 'เลขที่กรมธรรม์'}</label>
+          <input type="text" name="policyNumber" placeholder="${isTax ? 'เลขที่ใบเสร็จ' : 'เลขที่กรมธรรม์'}" value="${escapeAttr(editing?.policyNumber||'')}">
         </div>
-        ${assetType === 'vehicle' ? (isCompulsory ? `
+        ${assetType === 'vehicle' ? (isTax ? `
+        <div class="field">
+          <label>ประเภทรายการ</label>
+          <input type="text" value="ภาษีรถยนต์ประจำปี" disabled>
+          <input type="hidden" name="insClass" value="${TAX_CLASS}">
+        </div>
+        ` : isCompulsory ? `
         <div class="field">
           <label>ประเภทประกัน</label>
           <input type="text" value="พ.ร.บ. (ภาคบังคับ)" disabled>
@@ -595,19 +617,19 @@ function policyFormHtml(assetId, policyId){
         </div>
         `) : ''}
         <div class="field">
-          <label>เบี้ยประกัน (บาท)</label>
+          <label>${isTax ? 'ค่าภาษี (บาท)' : 'เบี้ยประกัน (บาท)'}</label>
           <input type="number" name="premium" step="0.01" placeholder="0" value="${escapeAttr(editing?.premium||'')}">
         </div>
-        <div class="field">
+        ${isTax ? '' : `<div class="field">
           <label>ทุนประกันภัย (บาท)</label>
           <input type="number" name="coverAmount" step="0.01" placeholder="0" value="${escapeAttr(editing?.coverAmount||'')}">
-        </div>
+        </div>`}
         <div class="field">
-          <label>วันเริ่มคุ้มครอง</label>
+          <label>${isTax ? 'วันที่ชำระภาษี' : 'วันเริ่มคุ้มครอง'}</label>
           <input type="date" name="startDate" value="${escapeAttr(editing?.startDate||'')}">
         </div>
         <div class="field">
-          <label>วันสิ้นสุดความคุ้มครอง</label>
+          <label>${isTax ? 'วันครบกำหนดภาษีครั้งถัดไป' : 'วันสิ้นสุดความคุ้มครอง'}</label>
           <input type="date" name="endDate" required value="${escapeAttr(editing?.endDate||'')}">
         </div>
         <div class="field full">
@@ -622,9 +644,9 @@ function policyFormHtml(assetId, policyId){
       </div>
 
       <div class="form-actions">
-        ${editing ? `<button type="button" class="btn btn-danger" id="btnDeletePolicy">ลบกรมธรรม์</button>` : ''}
+        ${editing ? `<button type="button" class="btn btn-danger" id="btnDeletePolicy">${isTax ? 'ลบรายการภาษี' : 'ลบกรมธรรม์'}</button>` : ''}
         <button type="button" class="btn" data-nav="assetDetail" data-asset="${assetId}" data-kind="${originKind}">ยกเลิก</button>
-        <button type="submit" class="btn btn-primary">${editing ? 'บันทึกการแก้ไข' : 'บันทึกกรมธรรม์'}</button>
+        <button type="submit" class="btn btn-primary">${editing ? 'บันทึกการแก้ไข' : (isTax ? 'บันทึกภาษี' : 'บันทึกกรมธรรม์')}</button>
       </div>
     </form>
   </div>`;
