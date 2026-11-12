@@ -2698,6 +2698,13 @@
     // Any manual edit invalidates the previous selection until the user picks
     // a product again (by click, or by typing an exact name/code match).
     var hidden = document.getElementById("productField");
+    var selected = (hidden && hidden.value)
+      ? state.settings.products.find(function (p) { return p.id === hidden.value; })
+      : null;
+    // If the text still matches the currently-selected product, this is not a
+    // real edit (some keyboards/IMEs/extensions fire a stray `input` event
+    // after a selection) — don't wipe the selection.
+    if (selected && inputEl.value === productComboLabel(selected)) return;
     if (hidden) hidden.value = "";
     applyProductToFields(null);
     openProductCombo(inputEl.value);
@@ -3396,6 +3403,15 @@
   document.getElementById("app").addEventListener("blur", function (e) {
     if (e.target.id === "productSearchField") handleProductSearchBlur(e.target);
   }, true);
+
+  // Pick a product on mousedown (and keep the search input focused) so the
+  // input's blur handler can't close the list before the click lands.
+  document.getElementById("app").addEventListener("mousedown", function (e) {
+    var item = e.target.closest && e.target.closest(".wt-combo-item");
+    if (!item) return;
+    e.preventDefault();
+    selectProductById(item.getAttribute("data-id"));
+  });
 
   // Prevent the browser's default "scroll wheel changes a focused number
   // input's value" behavior — otherwise scrolling the page while the mouse
